@@ -1,0 +1,40 @@
+import { Routes, Route, Link, NavLink, useLocation } from 'react-router-dom';
+import Home from './pages/Home';
+import PlanNew from './pages/PlanNew';
+import PlanDetail from './pages/PlanDetail';
+import PlanEdit from './pages/PlanEdit';
+import RunReport from './pages/RunReport';
+import RunCaseReport from './pages/RunCaseReport';
+import ReportList from './pages/ReportList';
+
+function Nav() {
+  const path = useLocation().pathname;
+  const planActive = path === '/' || path.startsWith('/plans');
+  const reportActive = path === '/reports' || path.startsWith('/runs');
+  return (
+    <nav className="app-nav">
+      <Link to="/" className="brand">UIAuto</Link>
+      <NavLink to="/" end className={planActive ? 'active' : ''}>测试计划</NavLink>
+      <NavLink to="/reports" className={reportActive ? 'active' : ''}>执行历史</NavLink>
+    </nav>
+  );
+}
+
+export default function App() {
+  return (
+    <div className="app-shell">
+      <Nav />
+      <main className="app-main">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/plans/new" element={<PlanNew />} />
+          <Route path="/plans/:id" element={<PlanDetail />} />
+          <Route path="/plans/:id/edit" element={<PlanEdit />} />
+          <Route path="/reports" element={<ReportList />} />
+          <Route path="/runs/:id" element={<RunReport />} />
+          <Route path="/runs/:runId/cases/:caseId" element={<RunCaseReport />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}

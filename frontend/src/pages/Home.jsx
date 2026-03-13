@@ -1,0 +1,184 @@
+import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
+
+const API = '/api';
+const PAGE_SIZE_OPTIONS = [10, 20, 50];
+
+export default function Home() {
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [toast, setToast] = useState(null);
+
+  const copyPlanId = (e, planId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigator.clipboard.writeText(String(planId)).then(() => {
+      setToast('已复制计划 id');
+      setTimeout(() => setToast(null), 2000);
+    }).catch(() => setToast('复制失败'));
+  };
+
+  const refreshPlans = () => {
+    fetch(API + '/plans').then((r) => r.json()).then(setPlans);
+  };
+
+  useEffect(() => {
+    fetch(API + '/plans')
+      .then((r) => r.json())
+      .then(setPlans)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filteredPlans = useMemo(() => {
+    if (!keyword.trim()) return plans;
+    const k = keyword.trim().toLowerCase();
+    return plans.filter((p) => {
+      const name = (p.name || '').toLowerCase();
+      const creator = (p.creator || '').toLowerCase();
+      const repo = `${(p.repo_owner || '')}/${(p.repo_name || '')}`.toLowerCase();
+      return name.includes(k) || creator.includes(k) || repo.includes(k);
+    });
+  }, [plans, keyword]);
+
+  const totalCount = filteredPlans.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pagePlans = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredPlans.slice(start, start + pageSize);
+  }, [filteredPlans, currentPage, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [keyword, pageSize]);
+
+  return (
+    <>
+      <div className="page-header">
+        <h1>测试计划</h1>
+        <Link to="/plans/new" className="btn btn-primary">新建计划</Link>
+      </div>
+      {plans.length > 0 && (
+        <div className="filter-bar">
+          <div className="filter-bar__field">
+            <label htmlFor="home-filter-keyword">关键词</label>
+            <input
+              id="home-filter-keyword"
+              type="text"
+              placeholder="计划名、创建人或仓库"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+            />
+          </div>
+          <div className="filter-bar__actions">
+            {keyword && (
+              <button type="button" className="btn btn-secondary" onClick={() => setKeyword('')}>
+                清除筛选
+              </button>
+            )}
+            <span className="filter-bar__summary">共 {totalCount} 条</span>
+          </div>
+        </div>
+      )}
+      {loading ? (
+        <div className="empty-state">
+          <div className="empty-state__icon" aria-hidden style={{ letterSpacing: '0.25em' }}>···</div>
+          <p className="empty-state__title">加载中</p>
+          <p className="empty-state__hint">正在获取测试计划列表</p>
+        </div>
+      ) : plans.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state__icon" aria-hidden>📋</div>
+          <p className="empty-state__title">还没有测试计划</p>
+          <p className="empty-state__hint">从 GitHub 拉取用例并创建计划后，即可执行并查看报告</p>
+          <Link to="/plans/new" className="btn btn-primary">新建计划</Link>
+        </div>
+      ) : filteredPlans.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state__icon" aria-hidden>🔍</div>
+          <p className="empty-state__title">没有匹配的计划</p>
+          <p className="empty-state__hint">试试调整关键词筛选</p>
+          <button type="button" className="btn btn-secondary" onClick={() => setKeyword('')}>清除筛选</button>
+        </div>
+      ) : (
+        <>
+        <div className="plan-list-wrapper">
+          {toast && <div className="plan-toast" role="status">{toast}</div>}
+          <ul className="plan-list">
+            {pagePlans.map((p) => {
+              const caseCount = JSON.parse(p.cases_json || '[]').length;
+              const created = p.created_at ? new Date(p.created_at).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+              const repoLabel = `${p.repo_owner}/${p.repo_name}`;
+              return (
+                <li key={p.id} className="card plan-card plan-card--compact">
+                  <div className="plan-card__left">
+                    <div className="plan-card__head">
+                      <span className="plan-card__title">{p.name}</span>
+                      <span
+                        className="plan-card__id"
+                        title="点击复制"
+                        onClick={(e) => copyPlanId(e, p.id)}
+                      >
+                        ID：{p.id}
+                      </span>
+                    </div>
+                    <div className="plan-card__tags">
+                      <span className="plan-card__tag">创建人：{p.creator || '—'}</span>
+                      <span className="plan-card__tag">创建时间：{created}</span>
+                      <span className="plan-card__tag">来源仓库：{repoLabel}</span>
+                      <span className="plan-card__tag">用例总数：{caseCount}</span>
+                    </div>
+                  </div>
+                  <div className="plan-card__actions">
+                    <Link to={`/plans/${p.id}`} className="btn btn-primary">开始执行</Link>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+        {totalCount > 0 && (
+          <div className="pagination-bar">
+            <div className="pagination-bar__size">
+              <span>每页</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+              <span>条</span>
+            </div>
+            <div className="pagination-bar__nav">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                上一页
+              </button>
+              <span className="pagination-bar__page-info">
+                第 {currentPage} / {totalPages} 页
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+        )}
+        </>
+      )}
+    </>
+  );
+}
