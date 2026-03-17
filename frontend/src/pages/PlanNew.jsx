@@ -10,7 +10,11 @@ export default function PlanNew() {
   const [branch, setBranch] = useState('main');
   const [token, setToken] = useState('');
   const [specs, setSpecs] = useState([]);
+  const [caseMetadata, setCaseMetadata] = useState({});
+  const [metadataLoading, setMetadataLoading] = useState(false);
   const [selected, setSelected] = useState(new Set());
+  const [casePage, setCasePage] = useState(1);
+  const CASE_PAGE_SIZE = 10;
   const [planName, setPlanName] = useState('');
   const [creator, setCreator] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,10 +33,12 @@ export default function PlanNew() {
     if (overrides.owner != null) setOwner(overrides.owner);
     if (overrides.repo != null) setRepo(overrides.repo);
     if (overrides.branch != null) setBranch(overrides.branch);
+    if (overrides.token != null) setToken(overrides.token);
+    const effectiveToken = (overrides.token != null ? String(overrides.token) : token).trim();
     setError('');
     setLoading(true);
     const params = new URLSearchParams({ owner: String(o).trim(), repo: String(r).trim(), branch: String(b).trim() });
-    if (token.trim()) params.set('token', token.trim());
+    if (effectiveToken) params.set('token', effectiveToken);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 25000);
     fetch(API + '/github/specs?' + params, { signal: controller.signal })
@@ -42,12 +48,38 @@ export default function PlanNew() {
         if (data.error) throw new Error(data.error);
         return data;
       })
-      .then((data) => {
+      .then(async (data) => {
         const list = Array.isArray(data) ? data : [];
         setSpecs(list);
         setSelected(new Set());
+        setCasePage(1);
         setError('');
         setFetchEmpty(list.length === 0);
+        if (list.length > 0) {
+          setMetadataLoading(true);
+          try {
+            const paths = list.map((s) => s.path);
+            const metaRes = await fetch(API + '/github/case-metadata', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                owner: String(o).trim(),
+                repo: String(r).trim(),
+                branch: String(b).trim(),
+                paths,
+                token: effectiveToken || undefined,
+              }),
+            });
+            const meta = await metaRes.json().catch(() => ({}));
+            setCaseMetadata(meta && typeof meta === 'object' ? meta : {});
+          } catch (_) {
+            setCaseMetadata({});
+          } finally {
+            setMetadataLoading(false);
+          }
+        } else {
+          setCaseMetadata({});
+        }
       })
       .catch((e) => {
         if (e.name === 'AbortError') {
@@ -56,6 +88,7 @@ export default function PlanNew() {
           setError(e.message || '拉取失败');
         }
         setSpecs([]);
+        setCaseMetadata({});
         setFetchEmpty(false);
       })
       .finally(() => {
@@ -74,6 +107,10 @@ export default function PlanNew() {
   const selectAll = () => setSelected(new Set(specs.map((s) => s.path)));
   const selectNone = () => setSelected(new Set());
 
+  const totalPages = Math.max(1, Math.ceil(specs.length / CASE_PAGE_SIZE));
+  const pageIndex = Math.min(Math.max(1, casePage), totalPages);
+  const paginatedSpecs = specs.slice((pageIndex - 1) * CASE_PAGE_SIZE, pageIndex * CASE_PAGE_SIZE);
+
   const createPlan = () => {
     if (!planName.trim()) {
       setError('请填写计划名称');
@@ -85,6 +122,15 @@ export default function PlanNew() {
     }
     setError('');
     setCreating(true);
+    const selectedArr = [...selected];
+    const case_metadata = {};
+    selectedArr.forEach((path) => {
+      const meta = caseMetadata[path];
+      const name = (meta?.name != null && String(meta.name).trim()) ? String(meta.name).trim() : '用例';
+      case_metadata[path] = meta
+        ? { name, description: meta.description, tags: meta.tags }
+        : { name: '用例' };
+    });
     fetch(API + '/plans', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -93,7 +139,8 @@ export default function PlanNew() {
         repo_owner: owner.trim(),
         repo_name: repo.trim(),
         repo_branch: branch.trim(),
-        cases: [...selected],
+        cases: selectedArr,
+        case_metadata,
         creator: creator.trim() || undefined,
         token: token.trim() || undefined,
       }),
@@ -142,7 +189,7 @@ export default function PlanNew() {
             type="button"
             className="btn btn-secondary"
             disabled={loading}
-            onClick={() => fetchSpecs({ owner: 'szu-sg', repo: 'web_ui', branch: 'main' })}
+            onClick={() => fetchSpecs({ owner: 'szu-sg', repo: 'web_ui', branch: 'main', token: '' })}
           >
             示例：szu-sg/web_ui
           </button>
@@ -159,25 +206,79 @@ export default function PlanNew() {
       {specs.length > 0 && (
         <div className="card">
           <h3><span className="step-label">2</span>选用例</h3>
-          <div className="card-actions" style={{ marginBottom: '0.75rem' }}>
+          {metadataLoading && <p className="card-muted" style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>正在拉取用例名称与描述…</p>}
+          <div className="plan-new-case-toolbar">
             <button type="button" className="btn btn-secondary" onClick={selectAll}>全选</button>
-            <button type="button" className="btn btn-secondary" onClick={selectNone}>取消</button>
-            <span className="card-muted">已选 {selected.size} 个</span>
+            <button type="button" className="btn btn-secondary" onClick={selectNone}>取消全选</button>
+            <span className="plan-new-case-count">已选 {selected.size} 个</span>
           </div>
-          <ul style={{ maxHeight: 280, overflow: 'auto' }}>
-            {specs.map((s) => (
-              <li key={s.path} style={{ padding: '0.35rem 0' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(s.path)}
-                    onChange={() => toggle(s.path)}
-                  />
-                  <span style={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>{s.path}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
+          <div className="plan-new-case-table-wrap">
+            <table className="plan-new-case-table">
+              <thead>
+                <tr>
+                  <th className="plan-new-case-table__th--check"><span className="sr-only">选择</span></th>
+                  <th className="plan-new-case-table__th--name">名称</th>
+                  <th className="plan-new-case-table__th--path">路径</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedSpecs.map((s) => {
+                  const meta = caseMetadata[s.path];
+                  const rawName = meta?.name != null ? String(meta.name).trim() : '';
+                  const displayName = rawName || '用例';
+                  return (
+                    <tr
+                      key={s.path}
+                      className="plan-new-case-row"
+                      onClick={() => toggle(s.path)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(s.path); } }}
+                      aria-label={`${displayName} ${s.path}，点击切换选择`}
+                    >
+                      <td className="plan-new-case-table__td--check" onClick={(e) => e.stopPropagation()}>
+                        <label className="plan-new-case-row__label">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(s.path)}
+                            onChange={() => toggle(s.path)}
+                            aria-label={`选择 ${displayName}：${s.path}`}
+                          />
+                        </label>
+                      </td>
+                      <td className="plan-new-case-table__td--name">{displayName}</td>
+                      <td className="plan-new-case-table__td--path" title={s.path}>{s.path}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {specs.length > CASE_PAGE_SIZE && (
+            <div className="plan-new-case-pagination">
+              <span className="plan-new-case-pagination__info">
+                共 {specs.length} 条，第 {pageIndex}/{totalPages} 页
+              </span>
+              <div className="plan-new-case-pagination__btns">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={pageIndex <= 1}
+                  onClick={() => setCasePage((p) => Math.max(1, p - 1))}
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={pageIndex >= totalPages}
+                  onClick={() => setCasePage((p) => Math.min(totalPages, p + 1))}
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -192,11 +293,11 @@ export default function PlanNew() {
             <label>创建人（选填）</label>
             <input value={creator} onChange={(e) => setCreator(e.target.value)} placeholder="如：张三" />
           </div>
-          <button type="button" className="btn btn-primary" onClick={createPlan} disabled={creating}>{creating ? '创建中，正在拉取用例名称…' : '创建'}</button>
+          <button type="button" className="btn btn-primary" onClick={createPlan} disabled={creating}>{creating ? '创建中…' : '创建'}</button>
         </div>
       )}
 
-      {error && <p style={{ color: '#f87171', marginTop: '0.5rem' }}>{error}</p>}
+      {error && <div className="form-error" role="alert">{error}</div>}
     </>
   );
 }

@@ -111,30 +111,34 @@ export default function Home() {
             {pagePlans.map((p) => {
               const caseCount = JSON.parse(p.cases_json || '[]').length;
               const created = p.created_at ? new Date(p.created_at).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
-              const repoLabel = `${p.repo_owner}/${p.repo_name}`;
+              const repoLabel = `${p.repo_owner || ''}/${p.repo_name || ''}`.trim() || '—';
+              const creator = p.creator != null && String(p.creator).trim() !== '' ? p.creator : '—';
               return (
                 <li key={p.id} className="card plan-card plan-card--compact">
-                  <div className="plan-card__left">
+                  <Link to={`/plans/${p.id}`} className="plan-card__link-wrap">
                     <div className="plan-card__head">
                       <span className="plan-card__title">{p.name}</span>
                       <span
                         className="plan-card__id"
                         title="点击复制"
                         onClick={(e) => copyPlanId(e, p.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copyPlanId(e, p.id); } }}
                       >
                         ID：{p.id}
                       </span>
                     </div>
-                    <div className="plan-card__tags">
-                      <span className="plan-card__tag">创建人：{p.creator || '—'}</span>
-                      <span className="plan-card__tag">创建时间：{created}</span>
-                      <span className="plan-card__tag">来源仓库：{repoLabel}</span>
-                      <span className="plan-card__tag">用例总数：{caseCount}</span>
+                    <div className="plan-card__meta">
+                      <span title={repoLabel}>仓库 {repoLabel}</span>
+                      <span className="plan-card__meta-sep" aria-hidden>·</span>
+                      <span>用例：{caseCount} 条</span>
+                      <span className="plan-card__meta-sep" aria-hidden>·</span>
+                      <span>创建时间 {created}</span>
+                      <span className="plan-card__meta-sep" aria-hidden>·</span>
+                      <span>创建人 {creator}</span>
                     </div>
-                  </div>
-                  <div className="plan-card__actions">
-                    <Link to={`/plans/${p.id}`} className="btn btn-primary">开始执行</Link>
-                  </div>
+                  </Link>
                 </li>
               );
             })}

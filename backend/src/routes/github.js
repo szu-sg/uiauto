@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listSpecFiles, getCaseDisplayNames } from '../services/github.js';
+import { listSpecFiles, getCaseDisplayNames, getCaseMetadata } from '../services/github.js';
 
 export const router = Router();
 
@@ -59,5 +59,32 @@ router.post('/case-names', async (req, res) => {
   } catch (err) {
     console.error('[GitHub] case-names 失败:', err.message);
     res.status(500).json({ error: err.message || '获取用例名失败' });
+  }
+});
+
+/** 批量获取用例元数据（名称、描述、标签） */
+router.post('/case-metadata', async (req, res) => {
+  const { owner, repo, branch, paths, token } = req.body || {};
+  if (!owner || !repo || !Array.isArray(paths)) {
+    return res.status(400).json({ error: 'owner, repo, paths 必填' });
+  }
+  try {
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('请求超时')), GITHUB_TIMEOUT_MS)
+    );
+    const metadata = await Promise.race([
+      getCaseMetadata({
+        owner,
+        repo,
+        branch: branch || 'main',
+        paths: paths.filter(Boolean),
+        token: token || undefined,
+      }),
+      timeoutPromise,
+    ]);
+    res.json(metadata);
+  } catch (err) {
+    console.error('[GitHub] case-metadata 失败:', err.message);
+    res.status(500).json({ error: err.message || '获取用例元数据失败' });
   }
 });

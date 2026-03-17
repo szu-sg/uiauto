@@ -4,6 +4,9 @@ import { useParams, Link } from 'react-router-dom';
 const API = '/api';
 const RESULTS_BASE = '/results';
 
+const BROWSER_LABELS = { chromium: 'Chromium', chrome: 'Chrome', msedge: 'Edge', firefox: 'Firefox', webkit: 'WebKit' };
+function getBrowserLabel(b) { return b ? (BROWSER_LABELS[b] || b) : '默认'; }
+
 export default function RunCaseReport() {
   const { runId, caseId } = useParams();
   const [data, setData] = useState(null);
@@ -24,7 +27,14 @@ export default function RunCaseReport() {
       .catch(() => setLogContent(null));
   }, [data?.log_path]);
 
-  if (!data) return <p className="card-muted">加载中...</p>;
+  if (!data) {
+    return (
+      <div className="loading-state">
+        <div className="loading-state__icon" aria-hidden style={{ letterSpacing: '0.25em' }}>···</div>
+        <p className="loading-state__text">加载用例详情</p>
+      </div>
+    );
+  }
 
   const planName = data.plan_name || ('计划 #' + (data.run_id || runId));
   const screenshotUrl = data.screenshot_path ? RESULTS_BASE + '/' + data.screenshot_path : null;
@@ -46,12 +56,16 @@ export default function RunCaseReport() {
       </div>
       <div className="page-header">
         <div>
-          <h1 className="run-case-detail-title">{data.case_path}</h1>
+          <h1 className="run-case-detail-title">{data.case_display_name || data.case_path}</h1>
+          {data.case_display_name && data.case_path !== (data.case_display_name || '') && (
+            <p className="card-muted" style={{ margin: '0.25rem 0 0 0', fontSize: '0.8125rem' }}>用例路径：{data.case_path}</p>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
             <span className={'badge badge-' + (data.status === 'passed' ? 'passed' : data.status === 'failed' ? 'failed' : 'pending')}>
               {data.status === 'passed' ? '通过' : data.status === 'failed' ? '失败' : data.status}
             </span>
             {data.duration_ms != null && <span className="card-muted">{data.duration_ms}ms</span>}
+            <span className="card-muted">浏览器：{getBrowserLabel(data.browser)}</span>
           </div>
         </div>
         <Link to={'/runs/' + runId} className="btn btn-secondary">返回报告</Link>
@@ -60,6 +74,21 @@ export default function RunCaseReport() {
       {/* 执行步骤：当前为单步（执行用例）+ 错误信息 */}
       <div className="card">
         <div className="section-title">执行步骤</div>
+        <p className="card-muted" style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>
+          用例名称：{data.case_display_name || data.case_path}
+        </p>
+        {data.case_metadata && (data.case_metadata.description || (data.case_metadata.tags && data.case_metadata.tags.length)) && (
+          <div style={{ marginBottom: '0.5rem' }}>
+            {data.case_metadata.description && <p className="card-muted" style={{ margin: 0, fontSize: '0.8125rem' }}>{data.case_metadata.description}</p>}
+            {data.case_metadata.tags && data.case_metadata.tags.length > 0 && (
+              <span style={{ display: 'inline-flex', gap: '0.25rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
+                {data.case_metadata.tags.map((t) => (
+                  <span key={t} style={{ fontSize: '0.7rem', padding: '0.1rem 0.35rem', background: '#3f3f46', borderRadius: 4 }}>{t}</span>
+                ))}
+              </span>
+            )}
+          </div>
+        )}
         <div className="run-case-steps">
           <div className="run-case-step">
             <span className="run-case-step__label">步骤 1</span>

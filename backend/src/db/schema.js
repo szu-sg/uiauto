@@ -63,5 +63,21 @@ if (!planCols.includes('creator')) {
 if (!planCols.includes('case_display_names_json')) {
   try { db.exec("ALTER TABLE plans ADD COLUMN case_display_names_json TEXT DEFAULT NULL"); } catch (_) {}
 }
+if (!planCols.includes('case_metadata_json')) {
+  try { db.exec("ALTER TABLE plans ADD COLUMN case_metadata_json TEXT DEFAULT NULL"); } catch (_) {}
+}
+if (!planCols.includes('run_browsers_json')) {
+  try { db.exec("ALTER TABLE plans ADD COLUMN run_browsers_json TEXT DEFAULT NULL"); } catch (_) {}
+}
+
+const runCols = db.prepare("PRAGMA table_info(runs)").all().map((c) => c.name);
+if (!runCols.includes('progress_phase')) {
+  try { db.exec("ALTER TABLE runs ADD COLUMN progress_phase TEXT DEFAULT NULL"); } catch (_) {}
+}
+
+const runCaseCols = db.prepare("PRAGMA table_info(run_cases)").all().map((c) => c.name);
+if (!runCaseCols.includes('browser')) {
+  try { db.exec("ALTER TABLE run_cases ADD COLUMN browser TEXT DEFAULT NULL"); } catch (_) {}
+}
 
 export default db;

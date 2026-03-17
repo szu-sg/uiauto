@@ -40,6 +40,84 @@ async function getFileContent(octokit, owner, repo, ref, filePath) {
   return Buffer.from(data.content, 'base64').toString('utf8');
 }
 
+const DESCRIPTION_MAX_LEN = 200;
+
+/**
+ * 从脚本内容解析用例元数据：名称、描述（首段 JSDoc/块注释）、标签（tag 配置与 @xxx）。
+ * @param {string} content - 文件内容
+ * @param {string} filePath - 用例路径
+ * @returns {{ name: string, description?: string, tags?: string[] }}
+ */
+export function parseCaseMetadata(content, filePath) {
+  const name = parseFirstTestTitle(content, filePath);
+  const result = { name };
+
+  if (!content || typeof content !== 'string') return result;
+
+  const trimmed = content.trim();
+
+  // description: 第一个 /** ... */ 或 /* ... */
+  const blockComment = trimmed.match(/\/\*\*?([\s\S]*?)\*\//);
+  if (blockComment && blockComment[1]) {
+    const desc = blockComment[1]
+      .replace(/^\s*\*\s?/gm, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, DESCRIPTION_MAX_LEN);
+    if (desc) result.description = desc;
+  }
+
+  // tags: tag: ['@a','@b'] / tag: "@smoke" / 标题中的 @word
+  const tagsSet = new Set();
+
+  const tagArrayMatch = trimmed.match(/tag\s*:\s*\[([^\]]*)\]/);
+  if (tagArrayMatch && tagArrayMatch[1]) {
+    tagArrayMatch[1].split(',').forEach((s) => {
+      const t = s.replace(/['"`]/g, '').trim();
+      if (t) tagsSet.add(t);
+    });
+  }
+  const tagSingleMatch = trimmed.match(/tag\s*:\s*['"`]([^'"`]+)['"`]/);
+  if (tagSingleMatch && tagSingleMatch[1]) tagsSet.add(tagSingleMatch[1].trim());
+  const atWords = trimmed.match(/@\w+/g);
+  if (atWords) atWords.forEach((w) => tagsSet.add(w));
+
+  if (tagsSet.size) result.tags = [...tagsSet];
+
+  return result;
+}
+
+/**
+ * 批量获取用例元数据（名称、描述、标签）。
+ * @param {object} opts - { owner, repo, branch, paths: string[], token? }
+ * @returns {Promise<Record<string, { name: string, description?: string, tags?: string[] }>>}
+ */
+export async function getCaseMetadata(opts) {
+  const { owner, repo, branch, paths, token } = opts;
+  if (!owner || !repo || !Array.isArray(paths) || paths.length === 0) {
+    return {};
+  }
+  const octokit = token ? new Octokit({ auth: token }) : new Octokit();
+  let ref = branch || 'main';
+  if (!ref) {
+    try {
+      ref = await getDefaultBranch(octokit, owner, repo);
+    } catch (_) {
+      ref = 'main';
+    }
+  }
+  const result = {};
+  for (const filePath of paths) {
+    try {
+      const content = await getFileContent(octokit, owner, repo, ref, filePath);
+      result[filePath] = parseCaseMetadata(content || '', filePath);
+    } catch (err) {
+      result[filePath] = { name: fallbackDisplayNameFromPath(filePath) };
+    }
+  }
+  return result;
+}
+
 /**
  * 批量获取用例显示名：从脚本解析 test 标题，解析不到则用文件名兜底，再不行用「未命名用例 (path)」。
  * @param {object} opts - { owner, repo, branch, paths: string[], token? }

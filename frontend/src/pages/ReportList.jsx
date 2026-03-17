@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 const API = '/api';
-const PAGE_SIZE_OPTIONS = [10, 20, 50];
+const PAGE_SIZE_OPTIONS = [8, 12, 20, 50];
 const STATUS_OPTIONS = [
   { value: '', label: '全部状态' },
   { value: 'done', label: '已完成' },
@@ -21,7 +21,17 @@ export default function ReportList() {
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(8);
+  const [toast, setToast] = useState(null);
+
+  const copyRunId = (e, runId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigator.clipboard.writeText(String(runId)).then(() => {
+      setToast('已复制执行 ID');
+      setTimeout(() => setToast(null), 2000);
+    }).catch(() => setToast('复制失败'));
+  };
 
   useEffect(() => {
     const url = planId ? `${API}/runs?planId=${planId}` : `${API}/runs`;
@@ -155,6 +165,7 @@ export default function ReportList() {
       ) : (
         <>
         <div className="report-list-wrapper">
+          {toast && <div className="plan-toast" role="status">{toast}</div>}
           <ul className="report-list">
             {pageRuns.map((r) => {
               const created = r.created_at ? new Date(r.created_at).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
@@ -165,19 +176,39 @@ export default function ReportList() {
                 const sec = Math.round((f - s) / 1000);
                 duration = sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
               }
-              const timeAndDuration = duration ? `${created} · ${duration}` : `${created} · —`;
               const casesCount = r.cases_count != null ? r.cases_count : 0;
               const statusKey = r.status === 'done' ? 'passed' : r.status === 'running' ? 'running' : r.status === 'failed' ? 'failed' : r.status === 'cancelled' ? 'cancelled' : 'pending';
               const statusLabel = r.status === 'done' ? '已完成' : r.status === 'running' ? '运行中' : r.status === 'failed' ? '执行失败' : r.status === 'cancelled' ? '已取消' : '排队中';
+              const creator = r.plan_creator != null && String(r.plan_creator).trim() !== '' ? r.plan_creator : '—';
               return (
-                <li key={r.id} className={`card report-card report-card--${statusKey} report-card--inline`}>
-                  <Link to={'/runs/' + r.id} className="report-card__row-link">
-                    <span className="report-card__link">{r.plan_name ? r.plan_name : `执行 ${r.id}`}</span>
-                    <span className={`badge badge-${statusKey}`}>{statusLabel}</span>
-                    <span className="report-card__meta">{timeAndDuration}</span>
-                    <span className="report-card__meta report-card__meta--secondary">{casesCount} 用例</span>
+                <li key={r.id} className={`card report-card report-card--block report-card--${statusKey}`}>
+                  <Link to={'/runs/' + r.id} className="report-card__link-wrap">
+                    <div className="report-card__row report-card__row--head">
+                      <div className="report-card__head">
+                        <span className="report-card__title">{r.plan_name || `执行 #${r.id}`}</span>
+                        <span
+                          className="report-card__id"
+                          title="点击复制"
+                          onClick={(e) => copyRunId(e, r.id)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copyRunId(e, r.id); } }}
+                        >
+                          ID：{r.id}
+                        </span>
+                      </div>
+                      <span className={`badge badge-${statusKey} report-card__status`}>{statusLabel}</span>
+                    </div>
+                    <div className="report-card__meta">
+                      <span>用例数 {casesCount}</span>
+                      <span className="report-card__meta-sep" aria-hidden>·</span>
+                      <span>{duration ? `执行耗时 ${duration}` : '执行耗时 —'}</span>
+                      <span className="report-card__meta-sep" aria-hidden>·</span>
+                      <span>创建时间 {created}</span>
+                      <span className="report-card__meta-sep" aria-hidden>·</span>
+                      <span>创建人 {creator}</span>
+                    </div>
                   </Link>
-                  <Link to={'/runs/' + r.id} className="btn btn-primary report-card__btn">测试报告</Link>
                 </li>
               );
             })}
