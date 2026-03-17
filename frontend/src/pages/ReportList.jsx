@@ -3,6 +3,17 @@ import { Link, useSearchParams } from 'react-router-dom';
 
 const API = '/api';
 const PAGE_SIZE_OPTIONS = [8, 12, 20, 50];
+
+/** 将接口返回的北京时间字符串格式化为本地显示（按 Asia/Shanghai） */
+function formatBeijingTime(str) {
+  if (!str) return '—';
+  const s = String(str).trim();
+  const d = /^[\d-]+\s+[\d:]+$/.test(s) && !s.includes('Z') && !s.includes('+')
+    ? new Date(s.replace(' ', 'T') + '+08:00')
+    : new Date(s);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'short' });
+}
 const STATUS_OPTIONS = [
   { value: '', label: '全部状态' },
   { value: 'done', label: '已完成' },
@@ -168,15 +179,21 @@ export default function ReportList() {
           {toast && <div className="plan-toast" role="status">{toast}</div>}
           <ul className="report-list">
             {pageRuns.map((r) => {
-              const created = r.created_at ? new Date(r.created_at).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+              const created = formatBeijingTime(r.created_at);
               let duration = '';
               if (r.started_at && r.finished_at) {
-                const s = new Date(r.started_at).getTime();
-                const f = new Date(r.finished_at).getTime();
+                const startStr = String(r.started_at).trim();
+                const endStr = String(r.finished_at).trim();
+                const parseBj = (x) => (/^[\d-]+\s+[\d:]+$/.test(x) && !x.includes('Z') && !x.includes('+') ? new Date(x.replace(' ', 'T') + '+08:00') : new Date(x)).getTime();
+                const s = parseBj(startStr);
+                const f = parseBj(endStr);
                 const sec = Math.round((f - s) / 1000);
                 duration = sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
               }
               const casesCount = r.cases_count != null ? r.cases_count : 0;
+              const totalCases = r.total_cases != null ? r.total_cases : 0;
+              const passedCount = r.passed_count != null ? r.passed_count : 0;
+              const passRateText = totalCases > 0 ? `通过率 ${passedCount}/${totalCases} (${Math.round((passedCount / totalCases) * 100)}%)` : '通过率 —';
               const statusKey = r.status === 'done' ? 'passed' : r.status === 'running' ? 'running' : r.status === 'failed' ? 'failed' : r.status === 'cancelled' ? 'cancelled' : 'pending';
               const statusLabel = r.status === 'done' ? '已完成' : r.status === 'running' ? '运行中' : r.status === 'failed' ? '执行失败' : r.status === 'cancelled' ? '已取消' : '排队中';
               const creator = r.plan_creator != null && String(r.plan_creator).trim() !== '' ? r.plan_creator : '—';
@@ -201,6 +218,8 @@ export default function ReportList() {
                     </div>
                     <div className="report-card__meta">
                       <span>用例数 {casesCount}</span>
+                      <span className="report-card__meta-sep" aria-hidden>·</span>
+                      <span>{passRateText}</span>
                       <span className="report-card__meta-sep" aria-hidden>·</span>
                       <span>{duration ? `执行耗时 ${duration}` : '执行耗时 —'}</span>
                       <span className="report-card__meta-sep" aria-hidden>·</span>

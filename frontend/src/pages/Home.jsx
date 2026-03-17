@@ -32,16 +32,18 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, []);
 
+  const safePlans = Array.isArray(plans) ? plans : [];
   const filteredPlans = useMemo(() => {
-    if (!keyword.trim()) return plans;
+    if (!keyword.trim()) return safePlans;
     const k = keyword.trim().toLowerCase();
-    return plans.filter((p) => {
+    return safePlans.filter((p) => {
+      if (!p || typeof p !== 'object') return false;
       const name = (p.name || '').toLowerCase();
       const creator = (p.creator || '').toLowerCase();
       const repo = `${(p.repo_owner || '')}/${(p.repo_name || '')}`.toLowerCase();
       return name.includes(k) || creator.includes(k) || repo.includes(k);
     });
-  }, [plans, keyword]);
+  }, [safePlans, keyword]);
 
   const totalCount = filteredPlans.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -61,7 +63,7 @@ export default function Home() {
         <h1>测试计划</h1>
         <Link to="/plans/new" className="btn btn-primary">新建计划</Link>
       </div>
-      {plans.length > 0 && (
+      {safePlans.length > 0 && (
         <div className="filter-bar">
           <div className="filter-bar__field">
             <label htmlFor="home-filter-keyword">关键词</label>
@@ -89,7 +91,7 @@ export default function Home() {
           <p className="empty-state__title">加载中</p>
           <p className="empty-state__hint">正在获取测试计划列表</p>
         </div>
-      ) : plans.length === 0 ? (
+      ) : safePlans.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state__icon" aria-hidden>📋</div>
           <p className="empty-state__title">还没有测试计划</p>
@@ -108,13 +110,22 @@ export default function Home() {
         <div className="plan-list-wrapper">
           {toast && <div className="plan-toast" role="status">{toast}</div>}
           <ul className="plan-list">
-            {pagePlans.map((p) => {
-              const caseCount = JSON.parse(p.cases_json || '[]').length;
-              const created = p.created_at ? new Date(p.created_at).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+            {pagePlans.map((p, idx) => {
+              if (!p || typeof p !== 'object') return null;
+              let caseCount = 0;
+              try {
+                caseCount = JSON.parse(p.cases_json || '[]').length;
+              } catch (_) {}
+              const created = (() => {
+                if (!p.created_at) return '—';
+                const s = String(p.created_at).trim();
+                const d = /^[\d-]+\s+[\d:]+$/.test(s) && !s.includes('Z') && !s.includes('+') ? new Date(s.replace(' ', 'T') + '+08:00') : new Date(s);
+                return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'short' });
+              })();
               const repoLabel = `${p.repo_owner || ''}/${p.repo_name || ''}`.trim() || '—';
               const creator = p.creator != null && String(p.creator).trim() !== '' ? p.creator : '—';
               return (
-                <li key={p.id} className="card plan-card plan-card--compact">
+                <li key={p.id ?? `plan-${idx}`} className="card plan-card plan-card--compact">
                   <Link to={`/plans/${p.id}`} className="plan-card__link-wrap">
                     <div className="plan-card__head">
                       <span className="plan-card__title">{p.name}</span>

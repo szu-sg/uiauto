@@ -7,7 +7,7 @@ const jobs = new Map();
 function triggerRun(planId) {
   const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(planId);
   if (!plan || !plan.schedule_enabled) return;
-  const r = db.prepare('INSERT INTO runs (plan_id, status) VALUES (?, ?)').run(planId, 'pending');
+  const r = db.prepare("INSERT INTO runs (plan_id, status, created_at) VALUES (?, ?, datetime('now', '+8 hours'))").run(planId, 'pending');
   executePlan(r.lastInsertRowid, plan);
   console.log('[Scheduler] 定时执行: 计划 #%s, 运行 #%s', planId, r.lastInsertRowid);
 }

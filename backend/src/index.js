@@ -1,3 +1,5 @@
+import 'dotenv/config';
+import './logger.js'; // 将 console 输出同时写入 backend/data/uiauto.log
 import express from 'express';
 import cors from 'cors';
 import path from 'path';

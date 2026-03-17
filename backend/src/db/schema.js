@@ -80,4 +80,36 @@ if (!runCaseCols.includes('browser')) {
   try { db.exec("ALTER TABLE run_cases ADD COLUMN browser TEXT DEFAULT NULL"); } catch (_) {}
 }
 
+// 一次性迁移：将已有的 created_at / started_at / finished_at 从 UTC 转为北京时间
+db.exec(`CREATE TABLE IF NOT EXISTS _uiauto_migrations (name TEXT PRIMARY KEY);`);
+const migrated = db.prepare("SELECT 1 FROM _uiauto_migrations WHERE name = 'beijing_time'").get();
+if (!migrated) {
+  try {
+    const pad = (n) => String(n).padStart(2, '0');
+    const toBeijing = (s) => {
+      if (!s || typeof s !== 'string') return s;
+      const d = new Date(s.includes('Z') || s.includes('+') || /-\d{2}:\d{2}$/.test(s) ? s : s.replace(' ', 'T') + 'Z');
+      if (Number.isNaN(d.getTime())) return s;
+      const b = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+      return `${b.getUTCFullYear()}-${pad(b.getUTCMonth() + 1)}-${pad(b.getUTCDate())} ${pad(b.getUTCHours())}:${pad(b.getUTCMinutes())}:${pad(b.getUTCSeconds())}`;
+    };
+    const runRows = db.prepare('SELECT id, created_at, started_at, finished_at FROM runs').all();
+    const runUpdate = db.prepare('UPDATE runs SET created_at = ?, started_at = ?, finished_at = ? WHERE id = ?');
+    for (const row of runRows) {
+      runUpdate.run(
+        toBeijing(row.created_at) ?? row.created_at,
+        toBeijing(row.started_at) ?? row.started_at,
+        toBeijing(row.finished_at) ?? row.finished_at,
+        row.id
+      );
+    }
+    const planRows = db.prepare('SELECT id, created_at FROM plans').all();
+    const planUpdate = db.prepare('UPDATE plans SET created_at = ? WHERE id = ?');
+    for (const row of planRows) {
+      planUpdate.run(toBeijing(row.created_at) ?? row.created_at, row.id);
+    }
+    db.prepare("INSERT OR IGNORE INTO _uiauto_migrations (name) VALUES ('beijing_time')").run();
+  } catch (_) {}
+}
+
 export default db;

@@ -32,6 +32,73 @@ function fallbackCaseName(pathStr) {
   return base.replace(/\.(spec|test)\.(ts|js|mjs)$/i, '') || base || '未命名用例';
 }
 
+/**
+ * 统一计划接口返回结构，兼容两种后端格式：
+ * - 本仓库：cases_json、case_metadata 对象(path->meta)、case_display_names、creator 字符串
+ * - 其他：test_case_list、case_metadata 数组、case_display_name_list、creator 对象
+ */
+function normalizePlanResponse(p) {
+  if (!p || typeof p !== 'object') return p;
+  let cases = p.cases;
+  if (!Array.isArray(cases) && p.cases_json) {
+    try {
+      cases = JSON.parse(p.cases_json || '[]');
+    } catch (_) {
+      cases = [];
+    }
+  }
+  if (!Array.isArray(cases) && Array.isArray(p.test_case_list)) {
+    cases = p.test_case_list.map((t) => (t && (t.name ?? t.path)) || String(t));
+  }
+  if (!Array.isArray(cases) && Array.isArray(p.case_display_name_list)) {
+    cases = p.case_display_name_list.slice();
+  }
+  if (!Array.isArray(cases)) cases = [];
+
+  let case_metadata = p.case_metadata;
+  if (Array.isArray(case_metadata)) {
+    const byPath = {};
+    case_metadata.forEach((item, i) => {
+      if (!item || typeof item !== 'object') return;
+      const path = cases[i];
+      if (path != null) {
+        byPath[path] = {
+          name: item.name,
+          description: item.description,
+          priority: item.priority,
+          author: item.author,
+          createdAt: item.createdAt,
+        };
+      }
+    });
+    case_metadata = byPath;
+  } else if (case_metadata && typeof case_metadata !== 'object') {
+    case_metadata = null;
+  }
+
+  let case_display_names = p.case_display_names;
+  if (!case_display_names || typeof case_display_names !== 'object') {
+    case_display_names = {};
+    cases.forEach((path) => {
+      const meta = case_metadata && case_metadata[path];
+      case_display_names[path] = (meta && meta.name) || path;
+    });
+  }
+
+  let creator = p.creator;
+  if (creator != null && typeof creator === 'object') {
+    creator = creator.name ?? creator.id ?? null;
+  }
+
+  return {
+    ...p,
+    cases,
+    case_metadata: case_metadata || null,
+    case_display_names,
+    creator: creator != null ? String(creator) : p.creator,
+  };
+}
+
 export default function PlanDetail() {
   const { id } = useParams();
   const [plan, setPlan] = useState(null);
@@ -52,20 +119,36 @@ export default function PlanDetail() {
   // 计划名编辑
   const [editingName, setEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
+  const [caseMetaRefreshing, setCaseMetaRefreshing] = useState(false);
+  const [planLoadError, setPlanLoadError] = useState(null);
 
   const refreshPlan = () => {
-    fetch(API + '/plans/' + id).then((r) => r.json()).then((p) => {
-      setPlan(p);
-      setScheduleEnabled(!!p.schedule_enabled);
-      setRunBrowsers(Array.isArray(p.run_browsers) ? [...p.run_browsers] : []);
-      setTriggerMode(p.schedule_enabled ? 'scheduled' : 'immediate');
-      setScheduleCron(p.schedule_cron || '');
-    });
+    setPlanLoadError(null);
+    fetch(API + '/plans/' + id)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status === 404 ? '计划不存在' : r.statusText))))
+      .then((p) => {
+        const normalized = normalizePlanResponse(p);
+        setPlan(normalized);
+        setScheduleEnabled(!!normalized.schedule_enabled);
+        setRunBrowsers(Array.isArray(normalized.run_browsers) ? [...normalized.run_browsers] : []);
+        setTriggerMode(normalized.schedule_enabled ? 'scheduled' : 'immediate');
+        setScheduleCron(normalized.schedule_cron || '');
+      })
+      .catch((err) => setPlanLoadError(err?.message || '加载失败'));
   };
 
   useEffect(() => {
     refreshPlan();
   }, [id]);
+
+  const refreshCaseMetadata = () => {
+    if (caseMetaRefreshing) return;
+    setCaseMetaRefreshing(true);
+    fetch(API + '/plans/' + id + '/refresh-case-names', { method: 'POST' })
+      .then(() => refreshPlan())
+      .catch(() => setToast('刷新失败'))
+      .finally(() => setCaseMetaRefreshing(false));
+  };
 
   const startRun = () => {
     setRunning(true);
@@ -152,8 +235,8 @@ export default function PlanDetail() {
 
   const removeCase = (pathToRemove) => {
     if (!window.confirm('确定从计划中移除该用例？')) return;
-    const cases = typeof plan.cases === 'undefined' ? JSON.parse(plan.cases_json || '[]') : plan.cases;
-    const next = cases.filter((p) => p !== pathToRemove);
+    const caseList = Array.isArray(plan.cases) ? plan.cases : (plan.cases_json ? (() => { try { return JSON.parse(plan.cases_json); } catch (_) { return []; } })() : []);
+    const next = caseList.filter((p) => p !== pathToRemove);
     if (next.length === cases.length) return;
     fetch(API + '/plans/' + id, {
       method: 'PUT',
@@ -165,13 +248,30 @@ export default function PlanDetail() {
   if (!plan) {
     return (
       <div className="loading-state">
-        <div className="loading-state__icon" aria-hidden style={{ letterSpacing: '0.25em' }}>···</div>
-        <p className="loading-state__text">加载计划详情</p>
+        {planLoadError ? (
+          <>
+            <div className="empty-state__icon" aria-hidden>⚠</div>
+            <p className="empty-state__title">加载失败</p>
+            <p className="empty-state__hint">{planLoadError}，请检查网络或后端服务。</p>
+            <Link to="/" className="btn btn-secondary">返回测试计划</Link>
+          </>
+        ) : (
+          <>
+            <div className="loading-state__icon" aria-hidden style={{ letterSpacing: '0.25em' }}>···</div>
+            <p className="loading-state__text">加载计划详情</p>
+          </>
+        )}
       </div>
     );
   }
 
-  const cases = typeof plan.cases === 'undefined' ? JSON.parse(plan.cases_json || '[]') : plan.cases;
+  const cases = Array.isArray(plan.cases) ? plan.cases : (() => {
+    try {
+      return plan.cases_json ? JSON.parse(plan.cases_json) : [];
+    } catch (_) {
+      return [];
+    }
+  })();
 
   const getCaseDisplayName = (c) => {
     const meta = plan.case_metadata && plan.case_metadata[c];
@@ -180,6 +280,29 @@ export default function PlanDetail() {
   const getCasePriority = (c) => {
     const meta = plan.case_metadata && plan.case_metadata[c];
     return (meta && meta.priority) || '—';
+  };
+  /** 优先级对应的 CSS 类名（用于颜色） */
+  const getCasePriorityClass = (c) => {
+    const p = getCasePriority(c);
+    if (!p || p === '—') return '';
+    const key = p.toUpperCase();
+    if (key === 'P0' || key === '高') return 'plan-detail-priority--p0';
+    if (key === 'P1' || key === '中') return 'plan-detail-priority--p1';
+    if (key === 'P2' || key === '低') return 'plan-detail-priority--p2';
+    if (key.startsWith('P')) return 'plan-detail-priority--p';
+    return 'plan-detail-priority--other';
+  };
+  const getCaseDescription = (c) => {
+    const meta = plan.case_metadata && plan.case_metadata[c];
+    return (meta && meta.description) || (getCaseDisplayName(c)) || '—';
+  };
+  const getCaseCreatedAt = (c) => {
+    const meta = plan.case_metadata && plan.case_metadata[c];
+    return (meta && meta.createdAt) || '—';
+  };
+  const getCaseAuthor = (c) => {
+    const meta = plan.case_metadata && plan.case_metadata[c];
+    return (meta && meta.author) != null && String(meta.author).trim() !== '' ? meta.author : '—';
   };
 
   const filteredCases = cases.filter((c) => {
@@ -234,7 +357,11 @@ export default function PlanDetail() {
         {plan.created_at && (
           <>
             <span className="card-muted">创建时间：</span>
-            <span>{new Date(plan.created_at).toLocaleString('zh-CN')}</span>
+            <span>{(() => {
+                const s = String(plan.created_at).trim();
+                const d = /^[\d-]+\s+[\d:]+$/.test(s) && !s.includes('Z') && !s.includes('+') ? new Date(s.replace(' ', 'T') + '+08:00') : new Date(s);
+                return Number.isNaN(d.getTime()) ? plan.created_at : d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+              })()}</span>
             <span className="plan-detail-meta-line__sep" aria-hidden>·</span>
           </>
         )}
@@ -245,7 +372,17 @@ export default function PlanDetail() {
       </div>
 
       <div className="card">
-        <div className="section-title">用例（{cases.length} 个）</div>
+        <div className="plan-detail-case-section-head">
+          <span className="section-title">用例（{cases.length} 个）</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={refreshCaseMetadata}
+            disabled={caseMetaRefreshing || cases.length === 0}
+          >
+            {caseMetaRefreshing ? '刷新中…' : '刷新用例元数据'}
+          </button>
+        </div>
         <div className="plan-detail-case-filters">
           <label className="plan-detail-case-filter">
             <span className="plan-detail-case-filter__label">名称</span>
@@ -275,6 +412,9 @@ export default function PlanDetail() {
               onChange={(e) => { setCaseFilterPriority(e.target.value); setCasePage(1); }}
             >
               <option value="">全部</option>
+              <option value="P0">P0</option>
+              <option value="P1">P1</option>
+              <option value="P2">P2</option>
               <option value="高">高</option>
               <option value="中">中</option>
               <option value="低">低</option>
@@ -285,41 +425,29 @@ export default function PlanDetail() {
           <table className="plan-detail-case-table">
             <thead>
               <tr>
-                <th>用例名称</th>
+                <th>用例描述</th>
+                <th>用例优先级</th>
                 <th>用例路径</th>
-                <th>优先级</th>
+                <th>用例创建时间</th>
+                <th>用例创建人</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              {paginatedCases.map((c) => {
-                const meta = plan.case_metadata && plan.case_metadata[c];
-                const name = getCaseDisplayName(c);
-                const desc = meta && meta.description;
-                const tags = meta && meta.tags;
-                const priority = getCasePriority(c);
-                return (
-                  <tr key={c}>
-                    <td>
-                      <div>
-                        <span title={desc || undefined}>{name}</span>
-                        {tags && tags.length > 0 && (
-                          <span style={{ display: 'inline-flex', gap: '0.2rem', marginLeft: '0.35rem', flexWrap: 'wrap' }}>
-                            {tags.map((t) => (
-                              <span key={t} style={{ fontSize: '0.65rem', padding: '0.05rem 0.25rem', background: '#3f3f46', borderRadius: 3 }}>{t}</span>
-                            ))}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="plan-detail-case-path-cell" title={c}>{c}</td>
-                    <td>{priority}</td>
-                    <td>
-                      <button type="button" className="btn btn-secondary btn-danger btn-sm" onClick={() => removeCase(c)}>移除</button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {paginatedCases.map((c) => (
+                <tr key={c}>
+                  <td className="plan-detail-case-desc-cell" title={getCaseDescription(c)}>{getCaseDescription(c)}</td>
+                  <td title={getCasePriority(c) === '—' ? '可点击上方「刷新用例元数据」从仓库拉取优先级' : undefined}>
+                    <span className={'plan-detail-priority ' + getCasePriorityClass(c)}>{getCasePriority(c)}</span>
+                  </td>
+                  <td className="plan-detail-case-path-cell" title={c}>{c}</td>
+                  <td>{getCaseCreatedAt(c)}</td>
+                  <td>{getCaseAuthor(c)}</td>
+                  <td>
+                    <button type="button" className="btn btn-secondary btn-danger btn-sm" onClick={() => removeCase(c)}>移除</button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

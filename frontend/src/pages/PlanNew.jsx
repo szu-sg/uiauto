@@ -128,7 +128,14 @@ export default function PlanNew() {
       const meta = caseMetadata[path];
       const name = (meta?.name != null && String(meta.name).trim()) ? String(meta.name).trim() : '用例';
       case_metadata[path] = meta
-        ? { name, description: meta.description, tags: meta.tags }
+        ? {
+            name,
+            description: meta.description,
+            tags: meta.tags,
+            priority: meta.priority,
+            author: meta.author,
+            createdAt: meta.createdAt,
+          }
         : { name: '用例' };
     });
     fetch(API + '/plans', {
@@ -218,6 +225,8 @@ export default function PlanNew() {
                 <tr>
                   <th className="plan-new-case-table__th--check"><span className="sr-only">选择</span></th>
                   <th className="plan-new-case-table__th--name">名称</th>
+                  <th className="plan-new-case-table__th--desc">用例描述</th>
+                  <th className="plan-new-case-table__th--priority">用例优先级</th>
                   <th className="plan-new-case-table__th--path">路径</th>
                 </tr>
               </thead>
@@ -226,6 +235,8 @@ export default function PlanNew() {
                   const meta = caseMetadata[s.path];
                   const rawName = meta?.name != null ? String(meta.name).trim() : '';
                   const displayName = rawName || '用例';
+                  const desc = meta?.description != null ? String(meta.description).trim() : '';
+                  const priority = meta?.priority != null ? String(meta.priority).trim() : '—';
                   return (
                     <tr
                       key={s.path}
@@ -247,6 +258,8 @@ export default function PlanNew() {
                         </label>
                       </td>
                       <td className="plan-new-case-table__td--name">{displayName}</td>
+                      <td className="plan-new-case-table__td--desc" title={desc || undefined}>{desc || '—'}</td>
+                      <td className="plan-new-case-table__td--priority">{priority}</td>
                       <td className="plan-new-case-table__td--path" title={s.path}>{s.path}</td>
                     </tr>
                   );

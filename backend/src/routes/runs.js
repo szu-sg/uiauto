@@ -6,17 +6,20 @@ export const router = Router();
 
 router.get('/', (req, res) => {
   const planId = req.query.planId;
+  const subCounts = `
+    (SELECT COUNT(DISTINCT case_path) FROM run_cases WHERE run_id = r.id) AS cases_count,
+    (SELECT COUNT(*) FROM run_cases WHERE run_id = r.id AND status = 'passed') AS passed_count,
+    (SELECT COUNT(*) FROM run_cases WHERE run_id = r.id) AS total_cases
+  `;
   let rows;
   if (planId) {
     rows = db.prepare(
-      `SELECT r.*, p.name AS plan_name, p.creator AS plan_creator,
-        (SELECT COUNT(DISTINCT case_path) FROM run_cases WHERE run_id = r.id) AS cases_count
+      `SELECT r.*, p.name AS plan_name, p.creator AS plan_creator, ${subCounts}
        FROM runs r LEFT JOIN plans p ON r.plan_id = p.id WHERE r.plan_id = ? ORDER BY r.created_at DESC`
     ).all(Number(planId));
   } else {
     rows = db.prepare(
-      `SELECT r.*, p.name AS plan_name, p.creator AS plan_creator,
-        (SELECT COUNT(DISTINCT case_path) FROM run_cases WHERE run_id = r.id) AS cases_count
+      `SELECT r.*, p.name AS plan_name, p.creator AS plan_creator, ${subCounts}
        FROM runs r LEFT JOIN plans p ON r.plan_id = p.id ORDER BY r.created_at DESC LIMIT 100`
     ).all();
   }
@@ -28,7 +31,7 @@ router.post('/', (req, res) => {
   if (!plan_id) return res.status(400).json({ error: 'plan_id required' });
   const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(Number(plan_id));
   if (!plan) return res.status(404).json({ error: 'Plan not found' });
-  const r = db.prepare('INSERT INTO runs (plan_id, status) VALUES (?, ?)').run(plan_id, 'pending');
+  const r = db.prepare("INSERT INTO runs (plan_id, status, created_at) VALUES (?, ?, datetime('now', '+8 hours'))").run(plan_id, 'pending');
   const runId = r.lastInsertRowid;
   executePlan(runId, plan);
   res.status(201).json({ id: runId, plan_id: Number(plan_id), status: 'pending' });
@@ -127,7 +130,7 @@ router.post('/:id/cancel', (req, res) => {
   if (row.status !== 'pending' && row.status !== 'running') {
     return res.status(400).json({ error: '只能取消排队中或运行中的任务' });
   }
-  db.prepare('UPDATE runs SET status = \'cancelled\', finished_at = datetime(\'now\', \'localtime\'), log_text = ?, progress_phase = NULL WHERE id = ?')
+  db.prepare("UPDATE runs SET status = 'cancelled', finished_at = datetime('now', '+8 hours'), log_text = ?, progress_phase = NULL WHERE id = ?")
     .run('用户手动停止', id);
   cancelRun(id);
   res.json({ id, status: 'cancelled' });

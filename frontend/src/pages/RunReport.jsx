@@ -16,6 +16,21 @@ function getBrowserLabel(browser) {
   return BROWSER_LABELS[browser] || browser;
 }
 
+/** 将接口返回的北京时间字符串转为 Date 的 getTime（用于计算时长） */
+function parseBeijingTime(str) {
+  if (!str) return NaN;
+  const s = String(str).trim();
+  const d = /^[\d-]+\s+[\d:]+$/.test(s) && !s.includes('Z') && !s.includes('+') ? new Date(s.replace(' ', 'T') + '+08:00') : new Date(s);
+  return d.getTime();
+}
+/** 将北京时间字符串格式化为显示 */
+function formatBeijingTime(str) {
+  if (!str) return '—';
+  const t = parseBeijingTime(str);
+  if (Number.isNaN(t)) return '—';
+  return new Date(t).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+}
+
 /** 将毫秒格式化为 mm:ss */
 function formatDurationMmSs(ms) {
   if (ms == null || ms === '') return '—';
@@ -82,7 +97,7 @@ export default function RunReport() {
     : null;
   const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
   const totalMs = cases.reduce((s, c) => s + (c.duration_ms || 0), 0);
-  const runDurationMs = run.started_at && run.finished_at ? new Date(run.finished_at) - new Date(run.started_at) : null;
+  const runDurationMs = run.started_at && run.finished_at ? parseBeijingTime(run.finished_at) - parseBeijingTime(run.started_at) : null;
 
   const runBrowsers = Array.isArray(run.run_browsers) ? run.run_browsers : [];
   const casesByBrowser = {};
@@ -189,7 +204,7 @@ export default function RunReport() {
           {run.started_at && (
             <div className="run-report-overview__metric">
               <span className="run-report-overview__label">开始时间</span>
-              <span className="run-report-overview__value run-report-overview__value--muted">{new Date(run.started_at).toLocaleString('zh-CN')}</span>
+              <span className="run-report-overview__value run-report-overview__value--muted">{formatBeijingTime(run.started_at)}</span>
             </div>
           )}
         </div>

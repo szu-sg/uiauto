@@ -154,7 +154,7 @@ router.put('/:id', (req, res) => {
   res.json({ id, updated: true });
 });
 
-/** 从 GitHub 拉取用例显示名并写入数据库，供计划详情页快速读取 */
+/** 从 GitHub 拉取用例显示名与元数据（含优先级、描述、创建时间、创建人）并写入数据库 */
 router.post('/:id/refresh-case-names', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -163,17 +163,28 @@ router.post('/:id/refresh-case-names', async (req, res, next) => {
     const cases = JSON.parse(plan.cases_json || '[]');
     if (cases.length === 0) {
       db.prepare('UPDATE plans SET case_display_names_json = ? WHERE id = ?').run('{}', id);
+      db.prepare('UPDATE plans SET case_metadata_json = ? WHERE id = ?').run('{}', id);
       return res.json({});
     }
-    const names = await getCaseDisplayNames({
-      owner: plan.repo_owner,
-      repo: plan.repo_name,
-      branch: plan.repo_branch || 'main',
-      paths: cases,
-    });
-    const json = JSON.stringify(names);
-    db.prepare('UPDATE plans SET case_display_names_json = ? WHERE id = ?').run(json, id);
-    res.json(names);
+    const [names, metadata] = await Promise.all([
+      getCaseDisplayNames({
+        owner: plan.repo_owner,
+        repo: plan.repo_name,
+        branch: plan.repo_branch || 'main',
+        paths: cases,
+      }),
+      getCaseMetadata({
+        owner: plan.repo_owner,
+        repo: plan.repo_name,
+        branch: plan.repo_branch || 'main',
+        paths: cases,
+      }),
+    ]);
+    const namesJson = JSON.stringify(names);
+    db.prepare('UPDATE plans SET case_display_names_json = ? WHERE id = ?').run(namesJson, id);
+    const metaJson = JSON.stringify(metadata);
+    db.prepare('UPDATE plans SET case_metadata_json = ? WHERE id = ?').run(metaJson, id);
+    res.json({ names, metadata });
   } catch (e) {
     next(e);
   }

@@ -261,7 +261,15 @@ a:hover {
   vertical-align: middle;
 }
 .plan-new-case-table__th--name {
-  width: 14rem;
+  width: 12rem;
+  text-align: left;
+}
+.plan-new-case-table__th--desc {
+  width: 16rem;
+  text-align: left;
+}
+.plan-new-case-table__th--priority {
+  width: 6rem;
   text-align: left;
 }
 .plan-new-case-table__th--path {
@@ -295,6 +303,18 @@ a:hover {
 }
 .plan-new-case-table__td--name {
   font-weight: 500;
+}
+.plan-new-case-table__td--desc {
+  font-size: 0.8125rem;
+  color: #a1a1aa;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-new-case-table__td--priority {
+  font-size: 0.8125rem;
+  color: #d4d4d8;
 }
 .plan-new-case-table__td--path {
   font-family: ui-monospace, monospace;
@@ -426,6 +446,16 @@ a:hover {
 }
 
 /* 计划详情：用例筛选 */
+.plan-detail-case-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.plan-detail-case-section-head .section-title {
+  margin: 0;
+}
 .plan-detail-case-filters {
   display: flex;
   flex-wrap: wrap;
@@ -487,6 +517,31 @@ a:hover {
 }
 .plan-detail-case-table tbody tr:hover {
   background: #1c1c1f;
+}
+.plan-detail-case-desc-cell {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 用例优先级颜色 */
+.plan-detail-priority {
+  font-weight: 500;
+}
+.plan-detail-priority--p0 {
+  color: #f97316;
+}
+.plan-detail-priority--p1 {
+  color: #eab308;
+}
+.plan-detail-priority--p2 {
+  color: #22c55e;
+}
+.plan-detail-priority--p {
+  color: #a78bfa;
+}
+.plan-detail-priority--other {
+  color: #a1a1aa;
 }
 .plan-detail-case-path-cell {
   font-family: monospace;

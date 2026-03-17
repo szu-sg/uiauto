@@ -43,10 +43,10 @@ async function getFileContent(octokit, owner, repo, ref, filePath) {
 const DESCRIPTION_MAX_LEN = 200;
 
 /**
- * 从脚本内容解析用例元数据：名称、描述（首段 JSDoc/块注释）、标签（tag 配置与 @xxx）。
+ * 从脚本内容解析用例元数据：名称、描述、标签、优先级、创建人、创建时间（含 CASE_META / CaseMeta 对象）。
  * @param {string} content - 文件内容
  * @param {string} filePath - 用例路径
- * @returns {{ name: string, description?: string, tags?: string[] }}
+ * @returns {{ name: string, description?: string, tags?: string[], priority?: string, author?: string, createdAt?: string }}
  */
 export function parseCaseMetadata(content, filePath) {
   const name = parseFirstTestTitle(content, filePath);
@@ -56,7 +56,7 @@ export function parseCaseMetadata(content, filePath) {
 
   const trimmed = content.trim();
 
-  // description: 第一个 /** ... */ 或 /* ... */
+  // description: 第一个 /** ... */ 或 /* ... */，或 CASE_META 中的 description
   const blockComment = trimmed.match(/\/\*\*?([\s\S]*?)\*\//);
   if (blockComment && blockComment[1]) {
     const desc = blockComment[1]
@@ -66,10 +66,19 @@ export function parseCaseMetadata(content, filePath) {
       .slice(0, DESCRIPTION_MAX_LEN);
     if (desc) result.description = desc;
   }
+  const metaDesc = trimmed.match(/description\s*:\s*['"`]([^'"`]*?)['"`]/);
+  if (metaDesc && metaDesc[1]) result.description = metaDesc[1].trim().slice(0, DESCRIPTION_MAX_LEN);
+
+  // CASE_META / CaseMeta: priority, author, createdAt
+  const priorityMatch = trimmed.match(/priority\s*:\s*['"`]([^'"`]*?)['"`]/);
+  if (priorityMatch && priorityMatch[1]) result.priority = priorityMatch[1].trim();
+  const authorMatch = trimmed.match(/author\s*:\s*['"`]([^'"`]*?)['"`]/);
+  if (authorMatch) result.author = authorMatch[1].trim();
+  const createdAtMatch = trimmed.match(/createdAt\s*:\s*['"`]([^'"`]*?)['"`]/);
+  if (createdAtMatch && createdAtMatch[1]) result.createdAt = createdAtMatch[1].trim();
 
   // tags: tag: ['@a','@b'] / tag: "@smoke" / 标题中的 @word
   const tagsSet = new Set();
-
   const tagArrayMatch = trimmed.match(/tag\s*:\s*\[([^\]]*)\]/);
   if (tagArrayMatch && tagArrayMatch[1]) {
     tagArrayMatch[1].split(',').forEach((s) => {
@@ -81,7 +90,6 @@ export function parseCaseMetadata(content, filePath) {
   if (tagSingleMatch && tagSingleMatch[1]) tagsSet.add(tagSingleMatch[1].trim());
   const atWords = trimmed.match(/@\w+/g);
   if (atWords) atWords.forEach((w) => tagsSet.add(w));
-
   if (tagsSet.size) result.tags = [...tagsSet];
 
   return result;
