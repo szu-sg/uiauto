@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { authFetch } from '../authApi';
 
 const API = '/api';
+/** 示例按钮填入的占位 Token，用户可替换为自己的 ghp_xxx（私有仓库拉取用） */
+const DEFAULT_GITHUB_TOKEN = 'ghp_xxx';
 
 export default function PlanNew() {
   const navigate = useNavigate();
@@ -41,7 +44,7 @@ export default function PlanNew() {
     if (effectiveToken) params.set('token', effectiveToken);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 25000);
-    fetch(API + '/github/specs?' + params, { signal: controller.signal })
+    authFetch(API + '/github/specs?' + params, { signal: controller.signal })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || res.statusText || '拉取失败');
@@ -59,7 +62,7 @@ export default function PlanNew() {
           setMetadataLoading(true);
           try {
             const paths = list.map((s) => s.path);
-            const metaRes = await fetch(API + '/github/case-metadata', {
+            const metaRes = await authFetch(API + '/github/case-metadata', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -138,7 +141,7 @@ export default function PlanNew() {
           }
         : { name: '用例' };
     });
-    fetch(API + '/plans', {
+    authFetch(API + '/plans', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -196,7 +199,10 @@ export default function PlanNew() {
             type="button"
             className="btn btn-secondary"
             disabled={loading}
-            onClick={() => fetchSpecs({ owner: 'szu-sg', repo: 'web_ui', branch: 'main', token: '' })}
+            onClick={() => {
+              setToken(DEFAULT_GITHUB_TOKEN);
+              fetchSpecs({ owner: 'szu-sg', repo: 'web_ui', branch: 'main', token: DEFAULT_GITHUB_TOKEN });
+            }}
           >
             示例：szu-sg/web_ui
           </button>

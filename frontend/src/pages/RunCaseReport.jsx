@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 
+import { authFetch } from '../authApi';
+
 const API = '/api';
 const RESULTS_BASE = '/results';
 
@@ -13,7 +15,7 @@ export default function RunCaseReport() {
   const [logContent, setLogContent] = useState(null);
 
   useEffect(() => {
-    fetch(API + '/runs/' + runId + '/cases/' + caseId)
+    authFetch(API + '/runs/' + runId + '/cases/' + caseId)
       .then((r) => r.json())
       .then(setData)
       .catch(() => setData(null));
@@ -40,6 +42,10 @@ export default function RunCaseReport() {
   const screenshotUrl = data.screenshot_path ? RESULTS_BASE + '/' + data.screenshot_path : null;
   const videoUrl = data.video_path ? RESULTS_BASE + '/' + data.video_path : null;
   const traceUrl = data.trace_path ? RESULTS_BASE + '/' + data.trace_path : null;
+  const stepScreenshots = Array.isArray(data.screenshots) && data.screenshots.length > 0
+    ? data.screenshots.map((p) => RESULTS_BASE + '/' + p)
+    : (screenshotUrl ? [screenshotUrl] : []);
+  const hasStepScreenshots = stepScreenshots.length > 0;
 
   return (
     <>
@@ -71,7 +77,7 @@ export default function RunCaseReport() {
         <Link to={'/runs/' + runId} className="btn btn-secondary">返回报告</Link>
       </div>
 
-      {/* 执行步骤：当前为单步（执行用例）+ 错误信息 */}
+      {/* 执行步骤：每步对应一张截图（test.step 时多张） */}
       <div className="card">
         <div className="section-title">执行步骤</div>
         <p className="card-muted" style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>
@@ -90,21 +96,39 @@ export default function RunCaseReport() {
           </div>
         )}
         <div className="run-case-steps">
-          <div className="run-case-step">
-            <span className="run-case-step__label">步骤 1</span>
-            <span className="run-case-step__name">执行用例</span>
-            {data.error_message && (
-              <div className="run-case-step__error">
-                <strong>错误信息</strong>
-                <pre>{data.error_message}</pre>
+          {hasStepScreenshots ? (
+            stepScreenshots.map((url, idx) => (
+              <div key={idx} className="run-case-step">
+                <span className="run-case-step__label">步骤 {idx + 1}</span>
+                <span className="run-case-step__name">{idx === 0 ? '执行用例' : `步骤 ${idx + 1}`}</span>
+                <a href={url} target="_blank" rel="noreferrer" style={{ display: 'block', marginTop: '0.5rem' }}>
+                  <img src={url} alt={`步骤 ${idx + 1} 截图`} className="run-case-artifact-img" />
+                </a>
+                {data.error_message && idx === stepScreenshots.length - 1 && (
+                  <div className="run-case-step__error">
+                    <strong>错误信息</strong>
+                    <pre>{data.error_message}</pre>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            ))
+          ) : (
+            <div className="run-case-step">
+              <span className="run-case-step__label">步骤 1</span>
+              <span className="run-case-step__name">执行用例</span>
+              {data.error_message && (
+                <div className="run-case-step__error">
+                  <strong>错误信息</strong>
+                  <pre>{data.error_message}</pre>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 截图 */}
-      {screenshotUrl && (
+      {/* 无步骤截图时保留单独截图区块（兼容旧数据） */}
+      {screenshotUrl && !hasStepScreenshots && (
         <div className="card">
           <div className="section-title">截图</div>
           <a href={screenshotUrl} target="_blank" rel="noreferrer">

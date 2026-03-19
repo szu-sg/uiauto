@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { authFetch } from '../authApi';
 
 const API = '/api';
 
@@ -124,7 +125,7 @@ export default function PlanDetail() {
 
   const refreshPlan = () => {
     setPlanLoadError(null);
-    fetch(API + '/plans/' + id)
+    authFetch(API + '/plans/' + id)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status === 404 ? '计划不存在' : r.statusText))))
       .then((p) => {
         const normalized = normalizePlanResponse(p);
@@ -144,7 +145,7 @@ export default function PlanDetail() {
   const refreshCaseMetadata = () => {
     if (caseMetaRefreshing) return;
     setCaseMetaRefreshing(true);
-    fetch(API + '/plans/' + id + '/refresh-case-names', { method: 'POST' })
+    authFetch(API + '/plans/' + id + '/refresh-case-names', { method: 'POST' })
       .then(() => refreshPlan())
       .catch(() => setToast('刷新失败'))
       .finally(() => setCaseMetaRefreshing(false));
@@ -152,7 +153,7 @@ export default function PlanDetail() {
 
   const startRun = () => {
     setRunning(true);
-    fetch(API + '/runs', {
+    authFetch(API + '/runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan_id: Number(id) }),
@@ -168,7 +169,7 @@ export default function PlanDetail() {
       : [...runBrowsers, versionId];
     setRunBrowsers(next);
     setBrowsersSaving(true);
-    fetch(API + '/plans/' + id, {
+    authFetch(API + '/plans/' + id, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ run_browsers: next.length ? next : null }),
@@ -185,7 +186,7 @@ export default function PlanDetail() {
     const next = runBrowsers.filter((b) => b !== versionId);
     setRunBrowsers(next);
     setBrowsersSaving(true);
-    fetch(API + '/plans/' + id, {
+    authFetch(API + '/plans/' + id, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ run_browsers: next.length ? next : null }),
@@ -204,7 +205,7 @@ export default function PlanDetail() {
     if (enable && !cron) return;
     setScheduleSaving(true);
     setScheduleEnabled(!!enable);
-    fetch(API + '/plans/' + id + '/schedule', {
+    authFetch(API + '/plans/' + id + '/schedule', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ schedule_enabled: !!enable, schedule_cron: cron || null }),
@@ -219,7 +220,7 @@ export default function PlanDetail() {
   const savePlanName = () => {
     const name = editNameValue.trim();
     if (!name || !plan) return;
-    fetch(API + '/plans/' + id, {
+    authFetch(API + '/plans/' + id, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
@@ -238,7 +239,7 @@ export default function PlanDetail() {
     const caseList = Array.isArray(plan.cases) ? plan.cases : (plan.cases_json ? (() => { try { return JSON.parse(plan.cases_json); } catch (_) { return []; } })() : []);
     const next = caseList.filter((p) => p !== pathToRemove);
     if (next.length === cases.length) return;
-    fetch(API + '/plans/' + id, {
+    authFetch(API + '/plans/' + id, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cases: next }),

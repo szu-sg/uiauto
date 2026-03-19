@@ -47,6 +47,13 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (run_id) REFERENCES runs(id)
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now', '+8 hours'))
+  );
 `);
 
 // 确保定时执行相关列存在（兼容旧库）
@@ -69,6 +76,9 @@ if (!planCols.includes('case_metadata_json')) {
 if (!planCols.includes('run_browsers_json')) {
   try { db.exec("ALTER TABLE plans ADD COLUMN run_browsers_json TEXT DEFAULT NULL"); } catch (_) {}
 }
+if (!planCols.includes('user_id')) {
+  try { db.exec('ALTER TABLE plans ADD COLUMN user_id INTEGER REFERENCES users(id)'); } catch (_) {}
+}
 
 const runCols = db.prepare("PRAGMA table_info(runs)").all().map((c) => c.name);
 if (!runCols.includes('progress_phase')) {
@@ -78,6 +88,9 @@ if (!runCols.includes('progress_phase')) {
 const runCaseCols = db.prepare("PRAGMA table_info(run_cases)").all().map((c) => c.name);
 if (!runCaseCols.includes('browser')) {
   try { db.exec("ALTER TABLE run_cases ADD COLUMN browser TEXT DEFAULT NULL"); } catch (_) {}
+}
+if (!runCaseCols.includes('screenshots_json')) {
+  try { db.exec("ALTER TABLE run_cases ADD COLUMN screenshots_json TEXT DEFAULT NULL"); } catch (_) {}
 }
 
 // 一次性迁移：将已有的 created_at / started_at / finished_at 从 UTC 转为北京时间

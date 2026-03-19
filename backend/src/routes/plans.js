@@ -33,7 +33,7 @@ function getNextCronRuns(cronExpression, count = 5) {
 export const router = Router();
 
 router.get('/', (req, res) => {
-  const rows = db.prepare('SELECT * FROM plans ORDER BY created_at DESC').all();
+  const rows = db.prepare('SELECT * FROM plans WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
   res.json(rows);
 });
 
@@ -47,9 +47,9 @@ router.post('/', async (req, res, next) => {
     const casesJson = JSON.stringify(casesArr);
     const creatorVal = creator != null ? String(creator).trim() || null : null;
     const stmt = db.prepare(
-      'INSERT INTO plans (name, repo_owner, repo_name, repo_branch, cases_json, creator) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO plans (name, repo_owner, repo_name, repo_branch, cases_json, creator, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
-    const r = stmt.run(name, repo_owner, repo_name, repo_branch || 'main', casesJson, creatorVal);
+    const r = stmt.run(name, repo_owner, repo_name, repo_branch || 'main', casesJson, creatorVal, req.user.id);
     const planId = r.lastInsertRowid;
     if (casesArr.length > 0) {
       if (case_metadata && typeof case_metadata === 'object') {
@@ -85,8 +85,18 @@ router.post('/', async (req, res, next) => {
   }
 });
 
+const RUN_BROWSERS_VALID = new Set(['chromium', 'chrome', 'msedge', 'firefox', 'webkit']);
+
+/** 必须在 /:id 之前注册，否则 cron 会被当成 id */
+router.get('/cron/next', (req, res) => {
+  const cron = req.query.cron;
+  const count = Math.min(20, Math.max(1, parseInt(req.query.count, 10) || 5));
+  const nexts = getNextCronRuns(cron, count);
+  res.json({ nexts: nexts.map((d) => d.toISOString()) });
+});
+
 router.get('/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(Number(req.params.id));
+  const row = db.prepare('SELECT * FROM plans WHERE id = ? AND user_id = ?').get(Number(req.params.id), req.user.id);
   if (!row) return res.status(404).json({ error: 'Plan not found' });
   row.cases = JSON.parse(row.cases_json || '[]');
   try {
@@ -113,19 +123,9 @@ router.get('/:id', (req, res) => {
   res.json(row);
 });
 
-const RUN_BROWSERS_VALID = new Set(['chromium', 'chrome', 'msedge', 'firefox', 'webkit']);
-
-/** GET /api/plans/cron/next?cron=0+9+*+*+*&count=5 返回当前 cron 接下来 count 次执行时间，默认 5 次 */
-router.get('/cron/next', (req, res) => {
-  const cron = req.query.cron;
-  const count = Math.min(20, Math.max(1, parseInt(req.query.count, 10) || 5));
-  const nexts = getNextCronRuns(cron, count);
-  res.json({ nexts: nexts.map((d) => d.toISOString()) });
-});
-
 router.put('/:id', (req, res) => {
   const id = Number(req.params.id);
-  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(id);
+  const plan = db.prepare('SELECT * FROM plans WHERE id = ? AND user_id = ?').get(id, req.user.id);
   if (!plan) return res.status(404).json({ error: 'Plan not found' });
   const { name, repo_owner, repo_name, repo_branch, cases, creator, run_browsers } = req.body;
   const casesJson = Array.isArray(cases) ? JSON.stringify(cases) : plan.cases_json;
@@ -158,7 +158,7 @@ router.put('/:id', (req, res) => {
 router.post('/:id/refresh-case-names', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(id);
+    const plan = db.prepare('SELECT * FROM plans WHERE id = ? AND user_id = ?').get(id, req.user.id);
     if (!plan) return res.status(404).json({ error: 'Plan not found' });
     const cases = JSON.parse(plan.cases_json || '[]');
     if (cases.length === 0) {
@@ -193,7 +193,7 @@ router.post('/:id/refresh-case-names', async (req, res, next) => {
 router.patch('/:id/schedule', (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const plan = db.prepare('SELECT id FROM plans WHERE id = ?').get(id);
+    const plan = db.prepare('SELECT id FROM plans WHERE id = ? AND user_id = ?').get(id, req.user.id);
     if (!plan) return res.status(404).json({ error: 'Plan not found' });
     const { schedule_enabled, schedule_cron } = req.body;
     const updates = [];
@@ -220,7 +220,7 @@ router.patch('/:id/schedule', (req, res, next) => {
 
 router.delete('/:id', (req, res) => {
   const id = Number(req.params.id);
-  const plan = db.prepare('SELECT id FROM plans WHERE id = ?').get(id);
+  const plan = db.prepare('SELECT id FROM plans WHERE id = ? AND user_id = ?').get(id, req.user.id);
   if (!plan) return res.status(404).json({ error: 'Plan not found' });
   const runIds = db.prepare('SELECT id FROM runs WHERE plan_id = ?').all(id).map((r) => r.id);
   if (runIds.length > 0) {

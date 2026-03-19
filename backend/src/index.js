@@ -8,6 +8,8 @@ import { fileURLToPath } from 'url';
 import { router as plansRouter } from './routes/plans.js';
 import { router as runsRouter } from './routes/runs.js';
 import { router as githubRouter } from './routes/github.js';
+import { router as authRouter } from './routes/auth.js';
+import { requireAuth } from './middleware/auth.js';
 import { loadAll as loadSchedules } from './services/scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,9 +17,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use('/api/plans', plansRouter);
-app.use('/api/runs', runsRouter);
-app.use('/api/github', githubRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/plans', requireAuth, plansRouter);
+app.use('/api/runs', requireAuth, runsRouter);
+app.use('/api/github', requireAuth, githubRouter);
 
 // Static result files (screenshots, videos) - path like /results/1/2/screenshot.png
 const resultsDir = path.join(__dirname, '../results');

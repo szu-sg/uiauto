@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { authFetch } from '../authApi';
 
 const API = '/api';
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
@@ -22,11 +23,11 @@ export default function Home() {
   };
 
   const refreshPlans = () => {
-    fetch(API + '/plans').then((r) => r.json()).then(setPlans);
+    authFetch(API + '/plans').then((r) => r.json()).then(setPlans);
   };
 
   useEffect(() => {
-    fetch(API + '/plans')
+    authFetch(API + '/plans')
       .then((r) => r.json())
       .then(setPlans)
       .finally(() => setLoading(false));

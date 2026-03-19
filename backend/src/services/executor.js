@@ -137,22 +137,24 @@ async function forceHeadlessInRepo(repoDir) {
   return () => Promise.resolve();
 }
 
-/** 克隆/拉取超时（毫秒），避免网络卡住时无限等待。可通过环境变量 CLONE_TIMEOUT_MS、PULL_TIMEOUT_MS 覆盖 */
-const CLONE_TIMEOUT_MS = Math.max(60000, parseInt(process.env.CLONE_TIMEOUT_MS, 10) || 300000);
-const PULL_TIMEOUT_MS = Math.max(30000, parseInt(process.env.PULL_TIMEOUT_MS, 10) || 120000);
+/** 克隆/拉取超时（毫秒），避免网络卡住时长时间等待。可通过环境变量 CLONE_TIMEOUT_MS、PULL_TIMEOUT_MS 覆盖 */
+const CLONE_TIMEOUT_MS = Math.max(30000, parseInt(process.env.CLONE_TIMEOUT_MS, 10) || 120000);
+const PULL_TIMEOUT_MS = Math.max(20000, parseInt(process.env.PULL_TIMEOUT_MS, 10) || 60000);
 
 function withTimeout(promise, ms, message) {
+  let timer;
   return Promise.race([
     promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(message)), ms)
-    ),
-  ]);
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]).finally(() => { if (timer) clearTimeout(timer); });
 }
 
 /**
  * Clone or pull repo, return local path.
  * 带超时，超时或网络失败会抛错，避免一直卡在「正在克隆仓库」。
+ * 若目录存在但非 git 仓库（如 .git 缺失），会删除后重新克隆。
  */
 async function ensureRepo(owner, repo, branch) {
   const dir = path.join(REPOS_DIR, `${owner}_${repo}`);
@@ -160,7 +162,13 @@ async function ensureRepo(owner, repo, branch) {
   const git = (await import('simple-git')).default;
   const gitImpl = git(REPOS_DIR);
 
-  if (await fs.access(dir).then(() => true).catch(() => false)) {
+  const dirExists = await fs.access(dir).then(() => true).catch(() => false);
+  const hasGit = dirExists && await fs.access(path.join(dir, '.git')).then(() => true).catch(() => false);
+  if (dirExists && !hasGit) {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+
+  if (dirExists && hasGit) {
     const g = git(dir);
     await withTimeout(
       (async () => {
@@ -297,10 +305,10 @@ async function copyArtifacts(fromResultDir, toResultDir, casePath) {
 }
 
 /**
- * Find first screenshot, video, trace in dir (recursive).
+ * Find first screenshot, video, trace in dir (recursive), and all screenshots for step report.
  */
 async function findArtifacts(dir) {
-  const out = { screenshot: null, video: null, trace: null };
+  const out = { screenshot: null, video: null, trace: null, screenshots: [] };
   const walk = async (d) => {
     const entries = await fs.readdir(d, { withFileTypes: true }).catch(() => []);
     for (const e of entries) {
@@ -308,13 +316,17 @@ async function findArtifacts(dir) {
       if (e.isDirectory()) await walk(full);
       else {
         const lower = e.name.toLowerCase();
-        if (lower.endsWith('.png') && !out.screenshot) out.screenshot = full;
+        if (lower.endsWith('.png')) {
+          if (!out.screenshot) out.screenshot = full;
+          out.screenshots.push(full);
+        }
         if ((lower.endsWith('.webm') || lower.endsWith('.mp4')) && !out.video) out.video = full;
         if (lower.endsWith('.zip') && e.name.includes('trace') && !out.trace) out.trace = full;
       }
     }
   };
   await walk(dir);
+  out.screenshots.sort((a, b) => a.localeCompare(b));
   return out;
 }
 
@@ -353,6 +365,10 @@ export function executePlan(runId, plan) {
 
       // 先写入 run_cases，再克隆/安装依赖，这样中途取消时报告里也能看到用例列表（均为 pending）
       const cases = JSON.parse(plan.cases_json || '[]');
+      if (!Array.isArray(cases) || cases.length === 0) {
+        setRunStatus.run('failed', '计划无用例，无法执行', runId);
+        return;
+      }
       let runBrowsers = null;
       try {
         if (plan.run_browsers_json) {
@@ -362,7 +378,7 @@ export function executePlan(runId, plan) {
       } catch (_) {}
 
       const updateCase = db.prepare(`
-        UPDATE run_cases SET status = ?, duration_ms = ?, error_message = ?, screenshot_path = ?, video_path = ?, trace_path = ?, log_path = ?
+        UPDATE run_cases SET status = ?, duration_ms = ?, error_message = ?, screenshot_path = ?, video_path = ?, trace_path = ?, log_path = ?, screenshots_json = ?
         WHERE id = ?
       `);
       const insertCase = db.prepare(`
@@ -397,7 +413,13 @@ export function executePlan(runId, plan) {
 
       updateProgress.run('cloning', runId);
       const repoDir = await ensureRepo(plan.repo_owner, plan.repo_name, plan.repo_branch || 'main');
-      if (db.prepare('SELECT status FROM runs WHERE id = ?').get(id)?.status === 'cancelled') return;
+      if (db.prepare('SELECT status FROM runs WHERE id = ?').get(id)?.status === 'cancelled') {
+        runningTask.runId = null;
+        runningTask.child = null;
+        runningTask.children.clear();
+        try { updateProgress.run(null, runId); } catch (_) {}
+        return;
+      }
 
       updateProgress.run('installing', runId);
       await installRepoDeps(repoDir);
@@ -416,7 +438,13 @@ export function executePlan(runId, plan) {
       await injectAuthFromEnv(repoDir);
 
       const afterSetup = db.prepare('SELECT status FROM runs WHERE id = ?').get(id);
-      if (afterSetup && afterSetup.status === 'cancelled') return;
+      if (afterSetup && afterSetup.status === 'cancelled') {
+        runningTask.runId = null;
+        runningTask.child = null;
+        runningTask.children.clear();
+        try { updateProgress.run(null, runId); } catch (_) {}
+        return;
+      }
 
       updateProgress.run('running', runId);
       const restoreHeadless = await forceHeadlessInRepo(repoDir);
@@ -431,37 +459,46 @@ export function executePlan(runId, plan) {
 
             const { casePath, browser, caseRowId } = task;
             const caseResultDir = path.join(runCasesDir, String(caseRowId));
-            await ensureDir(caseResultDir);
-
-            const start = Date.now();
-            let result = await runPlaywrightTest(repoDir, casePath, runId, caseRowId, runningTask, browser);
-            // 仓库若只配置了 chromium（firefox/webkit 被注释），请求 firefox/webkit 会报 Project(s) "firefox" not found，自动用 chromium 重试
-            const projectNotFound = result.code !== 0 && /Project\(s\)\s*"[^"]+"\s*not found[\s\S]*Available projects:/i.test(result.stderr);
-            if (projectNotFound && browser && browser.toLowerCase() !== 'chromium') {
-              result = await runPlaywrightTest(repoDir, casePath, runId, caseRowId, runningTask, 'chromium');
-              logChunks.push(`\n[${casePath}] 仓库未配置 "${browser}"，已用 chromium 重试\n`);
-            }
-            const duration = Date.now() - start;
-            const browserLabel = (projectNotFound && browser && browser.toLowerCase() !== 'chromium') ? 'chromium (fallback)' : (browser || 'default');
-            logChunks.push(`\n--- ${casePath} [${browserLabel}] (exit ${result.code}) ---\n${result.stdout}\n${result.stderr}\n`);
-
-            const fromResult = path.join(repoDir, 'test-results-' + String(caseRowId));
-            await copyArtifacts(fromResult, caseResultDir, casePath);
-            const artifacts = await findArtifacts(caseResultDir);
-            const logPath = path.join(caseResultDir, 'log.txt');
-            await fs.writeFile(logPath, result.stdout + '\n' + result.stderr, 'utf8');
-
             const rel = (p) => (p ? path.relative(RESULTS_DIR, p).replace(/\\/g, '/') : null);
-            updateCase.run(
-              result.code === 0 ? 'passed' : 'failed',
-              duration,
-              result.code !== 0 ? result.stderr.slice(-500) : null,
-              rel(artifacts.screenshot),
-              rel(artifacts.video),
-              rel(artifacts.trace),
-              rel(logPath),
-              caseRowId
-            );
+            try {
+              await ensureDir(caseResultDir);
+              const start = Date.now();
+              let result = await runPlaywrightTest(repoDir, casePath, runId, caseRowId, runningTask, browser);
+              // 仓库若只配置了 chromium（firefox/webkit 被注释），请求 firefox/webkit 会报 Project(s) "firefox" not found，自动用 chromium 重试
+              const projectNotFound = result.code !== 0 && /Project\(s\)\s*"[^"]+"\s*not found[\s\S]*Available projects:/i.test(result.stderr);
+              if (projectNotFound && browser && browser.toLowerCase() !== 'chromium') {
+                result = await runPlaywrightTest(repoDir, casePath, runId, caseRowId, runningTask, 'chromium');
+                logChunks.push(`\n[${casePath}] 仓库未配置 "${browser}"，已用 chromium 重试\n`);
+              }
+              const duration = Date.now() - start;
+              const browserLabel = (projectNotFound && browser && browser.toLowerCase() !== 'chromium') ? 'chromium (fallback)' : (browser || 'default');
+              logChunks.push(`\n--- ${casePath} [${browserLabel}] (exit ${result.code}) ---\n${result.stdout}\n${result.stderr}\n`);
+
+              const fromResult = path.join(repoDir, 'test-results-' + String(caseRowId));
+              await copyArtifacts(fromResult, caseResultDir, casePath);
+              const artifacts = await findArtifacts(caseResultDir);
+              const logPath = path.join(caseResultDir, 'log.txt');
+              await fs.writeFile(logPath, result.stdout + '\n' + result.stderr, 'utf8');
+
+              const screenshotsJson = artifacts.screenshots.length
+                ? JSON.stringify(artifacts.screenshots.map((p) => rel(p)).filter(Boolean))
+                : null;
+              updateCase.run(
+                result.code === 0 ? 'passed' : 'failed',
+                duration,
+                result.code !== 0 ? result.stderr.slice(-500) : null,
+                rel(artifacts.screenshot),
+                rel(artifacts.video),
+                rel(artifacts.trace),
+                rel(logPath),
+                screenshotsJson,
+                caseRowId
+              );
+            } catch (taskErr) {
+              const msg = taskErr?.message || String(taskErr);
+              logChunks.push(`\n--- ${casePath} [${browser || 'default'}] (执行异常) ---\n${msg}\n`);
+              updateCase.run('failed', null, msg, null, null, null, null, null, caseRowId);
+            }
           })
         ));
       } finally {

@@ -62,17 +62,141 @@ a:hover {
   background: #27272a;
   text-decoration: none;
 }
+.app-nav__trailer {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
 .server-status {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-left: auto;
   padding: 0.35rem 0.6rem;
   background: #1e3a5f;
   border-radius: 6px;
   font-size: 0.8rem;
   color: #93c5fd;
 }
+.app-nav__account {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.app-nav__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
+  color: #fafafa;
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.35);
+  flex-shrink: 0;
+}
+.app-nav__avatar-icon {
+  width: 18px;
+  height: 18px;
+  opacity: 0.95;
+}
+.app-nav__user {
+  font-size: 0.85rem;
+  color: #e4e4e7;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-nav__logout {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  margin-left: 0.15rem;
+}
+
+.loading-state--full {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+}
+
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  padding: 1rem;
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 1.75rem;
+}
+.auth-card__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+}
+.auth-card__hint {
+  margin: 0 0 1.25rem;
+  font-size: 0.875rem;
+  color: #a1a1aa;
+  line-height: 1.45;
+}
+.auth-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+.auth-form__field span {
+  font-size: 0.85rem;
+  color: #a1a1aa;
+}
+.auth-form__field input {
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid #3f3f46;
+  background: #18181b;
+  color: #e4e4e7;
+  font-size: 1rem;
+}
+.auth-form__error {
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  background: #450a0a;
+  color: #fca5a5;
+  font-size: 0.875rem;
+}
+.auth-form__submit {
+  width: 100%;
+  margin-top: 0.25rem;
+  justify-content: center;
+}
+.auth-card__footer {
+  margin: 1.25rem 0 0;
+  font-size: 0.875rem;
+  color: #a1a1aa;
+  text-align: center;
+}
+.auth-card__list {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  color: #d4d4d8;
+  line-height: 1.65;
+}
+.auth-card__list code {
+  font-size: 0.8rem;
+  background: #27272a;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  color: #e879f9;
+}
+
 .server-status__dot {
   width: 6px;
   height: 6px;
@@ -1622,6 +1746,18 @@ ul {
 .run-report-case-table td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #27272a; }
 .run-report-case-table th { background: #27272a; color: #71717a; font-weight: 600; font-size: 0.75rem; }
 .run-report-case-path { font-family: monospace; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 报告详情按钮：高亮提示，便于识别 */
+.run-report-detail-btn {
+  background: rgba(124, 58, 237, 0.15);
+  color: #a78bfa;
+  border: 1px solid #7c3aed;
+  font-weight: 500;
+}
+.run-report-detail-btn:hover {
+  background: rgba(124, 58, 237, 0.25);
+  color: #c4b5fd;
+  border-color: #8b5cf6;
+}
 
 /* 用例报告详情页 */
 .run-case-detail-title { margin: 0; font-size: 1.125rem; font-family: monospace; word-break: break-all; }

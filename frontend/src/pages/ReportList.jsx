@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { authFetch } from '../authApi';
 
 const API = '/api';
 const PAGE_SIZE_OPTIONS = [8, 12, 20, 50];
@@ -46,7 +47,7 @@ export default function ReportList() {
 
   useEffect(() => {
     const url = planId ? `${API}/runs?planId=${planId}` : `${API}/runs`;
-    fetch(url)
+    authFetch(url)
       .then((r) => r.json())
       .then(setRuns)
       .finally(() => setLoading(false));
@@ -54,7 +55,7 @@ export default function ReportList() {
 
   useEffect(() => {
     if (!planId) return;
-    fetch(API + '/plans/' + planId)
+    authFetch(API + '/plans/' + planId)
       .then((r) => r.json())
       .then((p) => setPlanName(p.name))
       .catch(() => setPlanName(null));

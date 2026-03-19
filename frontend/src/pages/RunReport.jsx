@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 
+import { authFetch } from '../authApi';
+
 const API = '/api';
 const RESULTS_BASE = '/results';
 
@@ -51,7 +53,7 @@ export default function RunReport() {
 
   useEffect(() => {
     const fetchRun = () => {
-      fetch(API + '/runs/' + id)
+      authFetch(API + '/runs/' + id)
         .then((r) => r.json())
         .then((data) => {
           setRun(data);
@@ -128,7 +130,7 @@ export default function RunReport() {
 
   const handleCancel = () => {
     if (!window.confirm('确定要停止该任务吗？')) return;
-    fetch(API + '/runs/' + id + '/cancel', { method: 'POST' })
+    authFetch(API + '/runs/' + id + '/cancel', { method: 'POST' })
       .then((r) => r.json())
       .then(() => {
         setPolling(false);
@@ -224,7 +226,7 @@ export default function RunReport() {
                     className={'run-report-overview-browser' + (isActive ? ' run-report-overview-browser--active' : '')}
                     onClick={() => handleTabClick(browserKey)}
                     aria-pressed={isActive}
-                    aria-label={`${label}：${stats.passed}/${stats.total} 通过${stats.failed > 0 ? `，${stats.failed} 失败` : ''}，点击查看详情`}
+                    aria-label={`${label}：${stats.passed}/${stats.total} 通过${stats.failed > 0 ? `，${stats.failed} 失败` : ''}，点击查看报告详情`}
                   >
                     <div className="run-report-overview-browser__top">
                       <span className="run-report-overview-browser__name">{label}</span>
@@ -249,7 +251,7 @@ export default function RunReport() {
       <div className="card">
         <div className="section-title">用例结果</div>
         <p className="card-muted" style={{ margin: '0 0 0.75rem 0', fontSize: '0.875rem' }}>
-          按浏览器分类展示，点击用例行的「详情」进入该次执行详情（步骤、截图、录屏等）。
+          按浏览器分类展示，点击用例行的「报告详情」进入该次执行详情（步骤、截图、录屏等）。
           {run.status === 'running' && total > 0 && (
             <span className="run-report-live-hint"> · 执行中已完成用例会实时更新</span>
           )}
@@ -294,7 +296,7 @@ export default function RunReport() {
                 const panelLabel = effectiveTab === '__default__' ? '默认' : getBrowserLabel(effectiveTab);
                 return (
                   <>
-                    <p className="run-report-tabpanel__caption">{panelLabel}：共 {currentBrowserCases.length} 条用例，点击「详情」查看步骤、截图与录屏。</p>
+                    <p className="run-report-tabpanel__caption">{panelLabel}：共 {currentBrowserCases.length} 条用例，点击「报告详情」查看步骤、截图与录屏。</p>
                     <div className="run-report-case-table-wrap">
                       <table className="run-report-case-table">
                         <thead>
@@ -316,7 +318,7 @@ export default function RunReport() {
                               </td>
                               <td>{formatDurationMmSs(c.duration_ms)}</td>
                               <td style={{ textAlign: 'right' }}>
-                                <Link to={`/runs/${id}/cases/${c.id}`} className="btn btn-secondary btn-sm">详情</Link>
+                                <Link to={`/runs/${id}/cases/${c.id}`} className="btn btn-sm run-report-detail-btn" title="查看该用例的报告详情（步骤、截图、录屏）">报告详情</Link>
                               </td>
                             </tr>
                           ))}

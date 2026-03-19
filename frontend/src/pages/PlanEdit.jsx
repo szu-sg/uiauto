@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 
+import { authFetch } from '../authApi';
+
 const API = '/api';
 
 export default function PlanEdit() {
@@ -14,7 +16,7 @@ export default function PlanEdit() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch(API + '/plans/' + id)
+    authFetch(API + '/plans/' + id)
       .then((r) => r.json())
       .then((p) => {
         setPlan(p);
@@ -37,7 +39,7 @@ export default function PlanEdit() {
     }
     setError('');
     setSaving(true);
-    fetch(API + '/plans/' + id, {
+    authFetch(API + '/plans/' + id, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: name.trim(), creator: creator.trim() || null, cases: trimmed }),
