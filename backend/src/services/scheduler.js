@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { db } from '../db/schema.js';
 import { executePlan } from './executor.js';
+import { notifyRunStarted } from './collaborationNotify.js';
 
 const jobs = new Map();
 
@@ -8,8 +9,18 @@ function triggerRun(planId) {
   const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(planId);
   if (!plan || !plan.schedule_enabled) return;
   const r = db.prepare("INSERT INTO runs (plan_id, status, created_at) VALUES (?, ?, datetime('now', '+8 hours'))").run(planId, 'pending');
-  executePlan(r.lastInsertRowid, plan);
-  console.log('[Scheduler] 定时执行: 计划 #%s, 运行 #%s', planId, r.lastInsertRowid);
+  const newRunId = r.lastInsertRowid;
+  executePlan(newRunId, plan);
+  try {
+    const cases = JSON.parse(plan.cases_json || '[]');
+    notifyRunStarted({
+      runId: newRunId,
+      planName: plan.name,
+      caseCount: Array.isArray(cases) ? cases.length : 0,
+      triggerLabel: '定时任务',
+    });
+  } catch (_) {}
+  console.log('[Scheduler] 定时执行: 计划 #%s, 运行 #%s', planId, newRunId);
 }
 
 export function loadAll() {

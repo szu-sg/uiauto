@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/schema.js';
 import { executePlan, cancelRun, getRunningRunId } from '../services/executor.js';
+import { notifyRunStarted } from '../services/collaborationNotify.js';
 
 export const router = Router();
 
@@ -37,6 +38,15 @@ router.post('/', (req, res) => {
   const r = db.prepare("INSERT INTO runs (plan_id, status, created_at) VALUES (?, ?, datetime('now', '+8 hours'))").run(plan_id, 'pending');
   const runId = r.lastInsertRowid;
   executePlan(runId, plan);
+  try {
+    const cases = JSON.parse(plan.cases_json || '[]');
+    notifyRunStarted({
+      runId,
+      planName: plan.name,
+      caseCount: Array.isArray(cases) ? cases.length : 0,
+      triggerLabel: req.user?.username ? `用户 ${req.user.username}` : undefined,
+    });
+  } catch (_) {}
   res.status(201).json({ id: runId, plan_id: Number(plan_id), status: 'pending' });
 });
 

@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { parse as dotenvParse } from 'dotenv';
 import PQueue from 'p-queue';
+import { notifyRunFinished } from './collaborationNotify.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPOS_DIR = path.join(__dirname, '../../repos');
@@ -200,6 +201,11 @@ function runCmd(cwd, command, args) {
   });
 }
 
+/** 设为 1 时跳过 playwright install --with-deps，避免在服务器上触发 sudo 密码（需事先在服务器执行过 sudo npx playwright install-deps chromium） */
+function skipPlaywrightWithDeps() {
+  return ['1', 'true', 'yes'].includes(String(process.env.SKIP_PLAYWRIGHT_DEPS || '').toLowerCase());
+}
+
 async function installRepoDeps(repoDir) {
   const pkgPath = path.join(repoDir, 'package.json');
   try {
@@ -208,7 +214,12 @@ async function installRepoDeps(repoDir) {
     return;
   }
   await runCmd(repoDir, 'npm', ['install', '--no-audit', '--no-fund']);
-  await runCmd(repoDir, 'npx', ['playwright', 'install', '--with-deps']).catch(() => {});
+  const pwResult = !skipPlaywrightWithDeps()
+    ? await runCmd(repoDir, 'npx', ['playwright', 'install', '--with-deps'])
+    : await runCmd(repoDir, 'npx', ['playwright', 'install']);
+  if (pwResult.code !== 0) {
+    console.warn('[Executor] playwright install 未成功，用例可能报 Executable doesn\'t exist。请在服务器该仓库下执行: npx playwright install', pwResult.err || '');
+  }
 }
 
 /**
@@ -360,6 +371,18 @@ export function executePlan(runId, plan) {
 
     try {
       const id = Number(runId);
+      const sendFinish = (status, extra = {}) => {
+        try {
+          let passed;
+          let total;
+          if (status === 'done') {
+            passed = db.prepare('SELECT COUNT(*) AS n FROM run_cases WHERE run_id = ? AND status = ?').get(runId, 'passed')?.n ?? 0;
+            total = db.prepare('SELECT COUNT(*) AS n FROM run_cases WHERE run_id = ?').get(runId)?.n ?? 0;
+          }
+          notifyRunFinished({ runId, planName: plan.name, status, passed, total, ...extra }).catch(() => {});
+        } catch (_) {}
+      };
+
       const existing = db.prepare('SELECT status FROM runs WHERE id = ?').get(id);
       if (existing && existing.status === 'cancelled') return;
 
@@ -367,6 +390,7 @@ export function executePlan(runId, plan) {
       const cases = JSON.parse(plan.cases_json || '[]');
       if (!Array.isArray(cases) || cases.length === 0) {
         setRunStatus.run('failed', '计划无用例，无法执行', runId);
+        sendFinish('failed', { errorHint: '计划无用例，无法执行' });
         return;
       }
       let runBrowsers = null;
@@ -418,6 +442,7 @@ export function executePlan(runId, plan) {
         runningTask.child = null;
         runningTask.children.clear();
         try { updateProgress.run(null, runId); } catch (_) {}
+        sendFinish('cancelled');
         return;
       }
 
@@ -443,6 +468,7 @@ export function executePlan(runId, plan) {
         runningTask.child = null;
         runningTask.children.clear();
         try { updateProgress.run(null, runId); } catch (_) {}
+        sendFinish('cancelled');
         return;
       }
 
@@ -516,10 +542,12 @@ export function executePlan(runId, plan) {
       const afterStatus = db.prepare('SELECT status FROM runs WHERE id = ?').get(id);
       if (afterStatus && afterStatus.status === 'cancelled') {
         setRunStatus.run('cancelled', '用户手动停止', runId);
+        sendFinish('cancelled');
         return;
       }
       db.prepare("UPDATE runs SET status = 'done', finished_at = datetime('now', '+8 hours'), result_dir = ?, log_text = ?, progress_phase = NULL WHERE id = ?")
         .run(path.relative(RESULTS_DIR, runCasesDir).replace(/\\/g, '/'), logAcc.slice(-2000), runId);
+      sendFinish('done');
     } catch (err) {
       runningTask.runId = null;
       runningTask.child = null;
@@ -528,6 +556,9 @@ export function executePlan(runId, plan) {
       const msg = err?.message || String(err);
       console.error('[Executor] runId=%s error:', runId, msg);
       setRunStatus.run('failed', `执行失败: ${msg}`, runId);
+      try {
+        notifyRunFinished({ runId, planName: plan.name, status: 'failed', errorHint: msg }).catch(() => {});
+      } catch (_) {}
     }
   });
 }

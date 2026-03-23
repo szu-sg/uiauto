@@ -79,11 +79,15 @@ npm run install:all
 
 ## 三、配置（可选）
 
-### 1. 账号与 JWT（多用户）
+### 1. 账号与注册（多用户）
 
 - **首个账号**：部署后浏览器打开站点 →「注册管理员」。
-- **更多用户**：在 `backend/.env` 或 systemd 环境中设置 **`UIAUTO_INVITE_CODE=你的邀请码`**，新用户注册时填写该码。
+- **开放注册（远端服务器常用）**：若当前未开放注册，在 **`backend/.env`** 中任选其一：
+  - **`UIAUTO_OPEN_REGISTER=1`**：内网开放注册，任何人可注册（无需邀请码），适合内网/测试环境。
+  - **`UIAUTO_INVITE_CODE=你的邀请码`**：仅持邀请码的用户可注册，适合需要管控的场景。
 - **生产务必设置** **`JWT_SECRET`**（随机字符串），否则 Token 易被伪造。
+
+修改 `.env` 后需**重启后端**（如 `pm2 restart uiauto`）生效。
 
 ### 2. 登录态（执行需登录的用例时必配）
 
@@ -107,6 +111,60 @@ export HOST=0.0.0.0        # 保持外网可访问（默认已是）
 # 仅本机： export HOST=127.0.0.1
 ```
 
+### 4. 执行测试计划时不弹 sudo 密码（服务端必配）
+
+执行计划时会「安装依赖」并跑 `npx playwright install --with-deps`，在 Linux 上会装系统包并**要求输入 sudo 密码**，导致卡住。按下面配置后，任意用户执行计划都不再需要输入密码。
+
+**步骤一：一次性安装 Playwright 系统依赖（需输入一次密码）**
+
+用**运行后端的同一用户**（如 `wjd`）在项目目录执行：
+
+```bash
+cd /opt/uiauto
+sudo npx playwright install-deps chromium
+```
+
+按提示输入当前用户密码，装完即可。
+
+**步骤二：在 backend/.env 中关闭“安装依赖”里的 sudo**
+
+在 `backend/.env` 中增加一行：
+
+```env
+SKIP_PLAYWRIGHT_DEPS=1
+```
+
+表示执行计划时只跑 `npx playwright install`（装浏览器到用户目录），不再跑 `--with-deps`（不装系统包、不触发 sudo）。
+
+> **说明**：旧版本曾因 Node ESM 中 `import` 先于 `dotenv.config()` 执行，导致 `SKIP_PLAYWRIGHT_DEPS` 未生效、仍会索要 sudo。当前代码已用 `src/loadEnv.js` 优先加载 `.env`；若你仍遇此问题，请 `git pull` 更新后再重启后端。
+
+**步骤三：重启后端**
+
+```bash
+pm2 restart uiauto
+# 或若没用 pm2：先停掉再 npm start
+```
+
+此后任意已注册用户点击「执行」都不会再出现 `[sudo] 密码` 提示。若首次执行某用例仓库仍报「Executable doesn't exist」，到该仓库目录执行一次 `npx playwright install`（见上文「Playwright 浏览器未安装」）。
+
+### 5. 金山协作 / WPS 群机器人通知（可选）
+
+在协作群内添加 **Webhook 机器人**，拿到发送地址后写入 `backend/.env`：
+
+```env
+WPS_NOTIFY_ENABLED=1
+WPS_WEBHOOK_URL=https://xz.wps.cn/api/v1/webhook/send?key=你的key
+# 消息内「查看报告」链接（同事浏览器能打开的 UIAuto 地址，勿尾斜杠）
+UIAUTO_PUBLIC_BASE_URL=https://你的域名或IP:3001
+```
+
+- **开始执行**：用户点击执行或定时任务触发时，向群内发一条 Markdown（计划名、Run 编号、用例数、触发方式）。
+- **结束**：全部跑完、失败、取消或「计划无用例」时，再发一条（含通过数/总数或失败原因）。
+
+文档参考：[WPS 机器人 Webhook](https://365.kdocs.cn/3rd/open/documents/app-integration-dev/guide/robot/webhook)、[金山协作通知](https://developer.kdocs.cn/server/notification/woa.html)。若贵司使用开放平台 `notification/woa` 等需 `access_token` 的接口，可再封装一层；当前实现为直接向 Webhook URL POST `msgtype: markdown` 的 JSON。
+
+未配置 `WPS_WEBHOOK_URL` 时不会发送任何请求。
+
 ---
 
 ## 四、构建前端并启动服务
@@ -115,7 +173,15 @@ export HOST=0.0.0.0        # 保持外网可访问（默认已是）
 
 ```env
 JWT_SECRET=请改为随机长字符串
-UIAUTO_INVITE_CODE=公司内部邀请码
+# 开放注册（二选一）：内网开放 或 邀请码
+UIAUTO_OPEN_REGISTER=1
+# UIAUTO_INVITE_CODE=公司内部邀请码
+# 服务端执行计划时不触发 sudo 密码（需先执行一次 sudo npx playwright install-deps chromium）
+SKIP_PLAYWRIGHT_DEPS=1
+# 可选：金山协作群 Webhook 通知
+# WPS_NOTIFY_ENABLED=1
+# WPS_WEBHOOK_URL=https://xz.wps.cn/api/v1/webhook/send?key=xxx
+# UIAUTO_PUBLIC_BASE_URL=https://你的访问地址:3001
 ```
 
 ### 1. 构建前端（产出到 backend/public）

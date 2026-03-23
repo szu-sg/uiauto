@@ -1,10 +1,13 @@
-import 'dotenv/config';
+import './loadEnv.js'; // 必须最先加载，否则 executor 等模块读不到 .env（见 loadEnv.js 注释）
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirnameRoot = path.dirname(fileURLToPath(import.meta.url));
+
 import './logger.js'; // 将 console 输出同时写入 backend/data/uiauto.log
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { router as plansRouter } from './routes/plans.js';
 import { router as runsRouter } from './routes/runs.js';
 import { router as githubRouter } from './routes/github.js';
@@ -12,7 +15,7 @@ import { router as authRouter } from './routes/auth.js';
 import { requireAuth } from './middleware/auth.js';
 import { loadAll as loadSchedules } from './services/scheduler.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = __dirnameRoot;
 const app = express();
 app.use(cors());
 app.use(express.json());
