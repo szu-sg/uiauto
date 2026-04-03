@@ -14,6 +14,7 @@ import { router as githubRouter } from './routes/github.js';
 import { router as authRouter } from './routes/auth.js';
 import { requireAuth } from './middleware/auth.js';
 import { loadAll as loadSchedules } from './services/scheduler.js';
+import { db as _startupDb } from './db/schema.js';
 
 const __dirname = __dirnameRoot;
 const app = express();
@@ -54,6 +55,29 @@ process.on('unhandledRejection', (reason, p) => {
 
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
+
+// ── 启动时恢复：将上次进程退出时仍处于 running/pending 状态的 run 标记为 failed ──
+(function recoverStaleRuns() {
+  try {
+    const staleRuns = _startupDb.prepare(
+      "SELECT id FROM runs WHERE status IN ('running', 'pending')"
+    ).all();
+    if (staleRuns.length === 0) return;
+    const msg = '后端已重启，本次运行在执行中途被中断，请重新触发。';
+    for (const r of staleRuns) {
+      _startupDb.prepare(
+        "UPDATE runs SET status = 'failed', finished_at = datetime('now', '+8 hours'), log_text = ?, progress_phase = NULL WHERE id = ?"
+      ).run(msg, r.id);
+      _startupDb.prepare(
+        "UPDATE run_cases SET status = 'failed', error_message = '后端重启，执行中断' WHERE run_id = ? AND status IN ('running', 'pending')"
+      ).run(r.id);
+    }
+    console.log(`[Startup] 已将 ${staleRuns.length} 条中断的运行记录标记为失败`);
+  } catch (e) {
+    console.error('[Startup] 恢复 stale runs 失败:', e.message);
+  }
+}());
+
 app.listen(PORT, HOST, () => {
   console.log(`UIAuto backend http://${HOST}:${PORT}`);
   try {

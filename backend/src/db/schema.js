@@ -52,6 +52,9 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    real_name TEXT DEFAULT NULL,
+    uid TEXT DEFAULT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
     created_at TEXT DEFAULT (datetime('now', '+8 hours'))
   );
 `);
@@ -79,10 +82,28 @@ if (!planCols.includes('run_browsers_json')) {
 if (!planCols.includes('user_id')) {
   try { db.exec('ALTER TABLE plans ADD COLUMN user_id INTEGER REFERENCES users(id)'); } catch (_) {}
 }
+if (!planCols.includes('notify_webhook_url')) {
+  try { db.exec('ALTER TABLE plans ADD COLUMN notify_webhook_url TEXT DEFAULT NULL'); } catch (_) {}
+}
+if (!planCols.includes('notify_mention_userids_json')) {
+  try { db.exec('ALTER TABLE plans ADD COLUMN notify_mention_userids_json TEXT DEFAULT NULL'); } catch (_) {}
+}
+if (!planCols.includes('notify_on_created')) {
+  try { db.exec('ALTER TABLE plans ADD COLUMN notify_on_created INTEGER NOT NULL DEFAULT 1'); } catch (_) {}
+}
+if (!planCols.includes('notify_on_success')) {
+  try { db.exec('ALTER TABLE plans ADD COLUMN notify_on_success INTEGER NOT NULL DEFAULT 1'); } catch (_) {}
+}
+if (!planCols.includes('notify_on_failure')) {
+  try { db.exec('ALTER TABLE plans ADD COLUMN notify_on_failure INTEGER NOT NULL DEFAULT 1'); } catch (_) {}
+}
 
 const runCols = db.prepare("PRAGMA table_info(runs)").all().map((c) => c.name);
 if (!runCols.includes('progress_phase')) {
   try { db.exec("ALTER TABLE runs ADD COLUMN progress_phase TEXT DEFAULT NULL"); } catch (_) {}
+}
+if (!runCols.includes('triggered_by_user_id')) {
+  try { db.exec('ALTER TABLE runs ADD COLUMN triggered_by_user_id INTEGER REFERENCES users(id)'); } catch (_) {}
 }
 
 const runCaseCols = db.prepare("PRAGMA table_info(run_cases)").all().map((c) => c.name);
@@ -92,6 +113,23 @@ if (!runCaseCols.includes('browser')) {
 if (!runCaseCols.includes('screenshots_json')) {
   try { db.exec("ALTER TABLE run_cases ADD COLUMN screenshots_json TEXT DEFAULT NULL"); } catch (_) {}
 }
+
+const userCols = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
+if (!userCols.includes('real_name')) {
+  try { db.exec("ALTER TABLE users ADD COLUMN real_name TEXT DEFAULT NULL"); } catch (_) {}
+}
+if (!userCols.includes('uid')) {
+  try { db.exec("ALTER TABLE users ADD COLUMN uid TEXT DEFAULT NULL"); } catch (_) {}
+}
+if (!userCols.includes('role')) {
+  try { db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'"); } catch (_) {}
+}
+try {
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uid ON users(uid) WHERE uid IS NOT NULL');
+} catch (_) {}
+try {
+  db.exec("UPDATE users SET role = 'member' WHERE role = 'user' OR role IS NULL OR trim(role) = ''");
+} catch (_) {}
 
 // 一次性迁移：将已有的 created_at / started_at / finished_at 从 UTC 转为北京时间
 db.exec(`CREATE TABLE IF NOT EXISTS _uiauto_migrations (name TEXT PRIMARY KEY);`);

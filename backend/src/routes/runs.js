@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/schema.js';
 import { executePlan, cancelRun, getRunningRunId } from '../services/executor.js';
-import { notifyRunStarted } from '../services/collaborationNotify.js';
+import { notifyRunStarted, mentionIdsForCollaborationUser } from '../services/collaborationNotify.js';
 
 export const router = Router();
 
@@ -35,18 +35,21 @@ router.post('/', (req, res) => {
   if (!plan_id) return res.status(400).json({ error: 'plan_id required' });
   const plan = db.prepare('SELECT * FROM plans WHERE id = ? AND user_id = ?').get(Number(plan_id), req.user.id);
   if (!plan) return res.status(404).json({ error: 'Plan not found' });
-  const r = db.prepare("INSERT INTO runs (plan_id, status, created_at) VALUES (?, ?, datetime('now', '+8 hours'))").run(plan_id, 'pending');
+  const r = db.prepare(
+    "INSERT INTO runs (plan_id, status, triggered_by_user_id, created_at) VALUES (?, ?, ?, datetime('now', '+8 hours'))"
+  ).run(plan_id, 'pending', req.user.id);
   const runId = r.lastInsertRowid;
   executePlan(runId, plan);
   try {
-    const cases = JSON.parse(plan.cases_json || '[]');
     notifyRunStarted({
       runId,
-      planName: plan.name,
-      caseCount: Array.isArray(cases) ? cases.length : 0,
-      triggerLabel: req.user?.username ? `用户 ${req.user.username}` : undefined,
-    });
-  } catch (_) {}
+      plan,
+      triggeredUserId: req.user.id,
+      mentionUserIds: mentionIdsForCollaborationUser(req.user.id),
+    }).catch((e) => console.warn('[CollaborationNotify] notifyRunStarted 异常:', e?.message || e));
+  } catch (e) {
+    console.warn('[CollaborationNotify] notifyRunStarted 调用失败:', e?.message || e);
+  }
   res.status(201).json({ id: runId, plan_id: Number(plan_id), status: 'pending' });
 });
 

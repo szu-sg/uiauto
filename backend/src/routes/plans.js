@@ -95,6 +95,44 @@ router.get('/cron/next', (req, res) => {
   res.json({ nexts: nexts.map((d) => d.toISOString()) });
 });
 
+/** 计划级金山协作通知：Webhook（对应群）、各事件开关（@ 对象由触发人 users.uid 自动决定） */
+router.patch('/:id/notify', (req, res) => {
+  const id = Number(req.params.id);
+  const plan = db.prepare('SELECT id FROM plans WHERE id = ? AND user_id = ?').get(id, req.user.id);
+  if (!plan) return res.status(404).json({ error: 'Plan not found' });
+
+  const { notify_webhook_url, notify_on_created, notify_on_success, notify_on_failure } = req.body || {};
+  const updates = [];
+  const values = [];
+
+  if (notify_webhook_url !== undefined) {
+    updates.push('notify_webhook_url = ?');
+    values.push(notify_webhook_url ? String(notify_webhook_url).trim() : null);
+  }
+  if (notify_on_created !== undefined) {
+    updates.push('notify_on_created = ?');
+    values.push(notify_on_created ? 1 : 0);
+  }
+  if (notify_on_success !== undefined) {
+    updates.push('notify_on_success = ?');
+    values.push(notify_on_success ? 1 : 0);
+  }
+  if (notify_on_failure !== undefined) {
+    updates.push('notify_on_failure = ?');
+    values.push(notify_on_failure ? 1 : 0);
+  }
+
+  if (!updates.length) {
+    return res.status(400).json({ error: '无有效字段' });
+  }
+  values.push(id);
+  db.prepare('UPDATE plans SET ' + updates.join(', ') + ' WHERE id = ?').run(...values);
+  const row = db.prepare(
+    'SELECT notify_webhook_url, notify_on_created, notify_on_success, notify_on_failure FROM plans WHERE id = ?'
+  ).get(id);
+  res.json({ id, ...row });
+});
+
 router.get('/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM plans WHERE id = ? AND user_id = ?').get(Number(req.params.id), req.user.id);
   if (!row) return res.status(404).json({ error: 'Plan not found' });

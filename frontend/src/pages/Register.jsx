@@ -4,10 +4,18 @@ import { setToken } from '../authApi';
 
 const API = '/api';
 
+function normalizeWpsUsername(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return '';
+  if (!t.includes('@')) return `${t}@wps.cn`.toLowerCase();
+  return t.toLowerCase();
+}
+
 export default function Register({ onLogin }) {
   const [username, setUsername] = useState('');
+  const [realName, setRealName] = useState('');
+  const [uid, setUid] = useState('');
   const [password, setPassword] = useState('');
-  const [inviteCode, setInviteCode] = useState('');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
   const [bootstrap, setBootstrap] = useState(null);
@@ -24,8 +32,12 @@ export default function Register({ onLogin }) {
     e.preventDefault();
     setErr('');
     setLoading(true);
-    const body = { username: username.trim(), password };
-    if (bootstrap?.needInvite) body.invite_code = inviteCode.trim();
+    const body = {
+      username: normalizeWpsUsername(username),
+      real_name: realName.trim(),
+      uid: uid.trim(),
+      password,
+    };
     fetch(API + '/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -64,53 +76,61 @@ export default function Register({ onLogin }) {
     );
   }
 
-  if (!bootstrap.allowRegister) {
-    return (
-      <div className="auth-page">
-        <div className="auth-card card">
-          <h1 className="auth-card__title">暂未开放注册</h1>
-          <p className="auth-card__hint" style={{ lineHeight: 1.6 }}>
-            已有管理员账号时，需要任选一种方式开放新用户注册，由管理员在<strong>服务器</strong>配置后重启后端：
-          </p>
-          <ul className="auth-card__list">
-            <li>
-              <strong>方式一（推荐）</strong>：在 <code>backend/.env</code> 设置{' '}
-              <code>UIAUTO_INVITE_CODE=你们的口令</code>，把口令告诉同事，在此页用邀请码注册。
-            </li>
-            <li>
-              <strong>方式二（纯内网）</strong>：设置{' '}
-              <code>UIAUTO_OPEN_REGISTER=1</code>，任何人可直接注册（无需邀请码）。
-            </li>
-          </ul>
-          <p className="auth-card__footer">
-            <Link to="/login">返回登录</Link>
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="auth-page">
       <div className="auth-card card">
-        <h1 className="auth-card__title">
-          {bootstrap.hasUsers ? (bootstrap.openRegister ? '注册新用户' : '注册新用户') : '注册管理员'}
-        </h1>
+        <h1 className="auth-card__title">{bootstrap.hasUsers ? '注册新用户' : '注册管理员'}</h1>
         <p className="auth-card__hint">
-          {!bootstrap.hasUsers && '首个账号将继承系统中尚未归属的测试计划。'}
-          {bootstrap.hasUsers && bootstrap.needInvite && '请输入管理员提供的邀请码。'}
-          {bootstrap.hasUsers && bootstrap.openRegister && '当前为开放注册模式，填写用户名与密码即可。'}
+          {/* {!bootstrap.hasUsers && '首个账号将继承系统中尚未归属的测试计划。'}
+          {bootstrap.hasUsers && '填写 WPS 邮箱、姓名、金山办公用户 ID 与密码即可完成注册。'} */}
         </p>
         <form onSubmit={submit} className="auth-form">
           {err && <div className="auth-form__error" role="alert">{err}</div>}
           <label className="auth-form__field">
             <span>用户名</span>
+            <div className="auth-form__wps-email">
+              <input
+                className="auth-form__wps-email-input"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                placeholder="办公邮箱"
+                required
+              />
+              {!username.includes('@') && (
+                <span className="auth-form__wps-email-suffix" aria-hidden>
+                  @wps.cn
+                </span>
+              )}
+            </div>
+            {username.trim() && !username.includes('@') && (
+              <span className="auth-form__field-hint">
+                将注册为 {normalizeWpsUsername(username)}
+              </span>
+            )}
+          </label>
+          <label className="auth-form__field">
+            <span>姓名</span>
             <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              placeholder="2～32 位，字母数字下划线或中文"
+              value={realName}
+              onChange={(e) => setRealName(e.target.value)}
+              autoComplete="name"
+              placeholder="真实姓名"
               required
+              minLength={2}
+              maxLength={32}
+            />
+          </label>
+          <label className="auth-form__field">
+            <span>UID</span>
+            <input
+              value={uid}
+              onChange={(e) => setUid(e.target.value)}
+              autoComplete="off"
+              placeholder="金山办公用户ID"
+              required
+              minLength={3}
+              maxLength={64}
             />
           </label>
           <label className="auth-form__field">
@@ -125,17 +145,6 @@ export default function Register({ onLogin }) {
               minLength={6}
             />
           </label>
-          {bootstrap.needInvite && (
-            <label className="auth-form__field">
-              <span>邀请码</span>
-              <input
-                value={inviteCode}
-                onChange={(e) => setInviteCode(e.target.value)}
-                autoComplete="off"
-                required
-              />
-            </label>
-          )}
           <button type="submit" className="btn btn-primary auth-form__submit" disabled={loading}>
             {loading ? '提交中…' : '注册'}
           </button>

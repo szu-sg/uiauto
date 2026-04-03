@@ -24,6 +24,18 @@
 - **JWT**：生产环境请设置 **`JWT_SECRET`**（随机长字符串），勿使用默认值。
 - 每个用户只能看到、执行、删除**自己的**计划与对应执行记录。
 
+## 金山协作群通知（可选 · Webhook）
+
+在**测试计划详情页**可配置：发到哪个群（该群机器人的 **Webhook 地址**），以及「任务创建 / 成功 / 失败·取消」是否推送。**@ 提醒**会自动指向**触发本次运行的人**（手动执行 = 当前用户；定时任务 = 计划负责人），使用其账号在注册时填写的 **UID**（`users.uid`，需与金山协作侧一致）。未填计划级 Webhook 时，回退使用服务器环境变量里的默认地址。
+
+全局默认（可选）：
+
+- `WPS_WEBHOOK_URL`：默认群机器人 Webhook  
+- `WPS_NOTIFY_ENABLED=1`：是否启用全局默认 URL；设为 `0` / `false` / `no` 可关闭（计划里单独填了 Webhook 仍会发到该群）  
+- `UIAUTO_PUBLIC_BASE_URL`：站点根地址（无尾斜杠），用于消息里的「查看报告」链接  
+
+说明见 [金山协作 · 机器人 Webhook](https://365.kdocs.cn/3rd/open/documents/app-integration-dev/guide/robot/webhook)。
+
 ## 快速开始
 
 ### 1. 安装依赖

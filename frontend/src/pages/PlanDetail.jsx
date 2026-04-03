@@ -4,6 +4,30 @@ import { authFetch } from '../authApi';
 
 const API = '/api';
 
+/** 展示用：遮盖 Webhook URL 中 key/token 等敏感查询参数，避免旁人窥屏 */
+function maskWebhookUrlForDisplay(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    for (const name of ['key', 'token', 'secret', 'sign', 'access_token']) {
+      if (!u.searchParams.has(name)) continue;
+      const v = u.searchParams.get(name);
+      if (v == null || v === '') continue;
+      u.searchParams.set(
+        name,
+        v.length <= 8 ? '••••••••' : `${v.slice(0, 2)}••••••${v.slice(-2)}`
+      );
+    }
+    return u.toString();
+  } catch {
+    return s.replace(/([?&])(key|token|secret|sign|access_token)=([^&]*)/gi, (_m, sep, k, v) => {
+      const masked = !v || v.length <= 8 ? '••••••••' : `${v.slice(0, 2)}••••••${v.slice(-2)}`;
+      return `${sep}${k}=${masked}`;
+    });
+  }
+}
+
 /** 浏览器及其内核版本（联动：先选浏览器，再选该浏览器下的版本） */
 const BROWSER_WITH_VERSIONS = [
   { id: 'chromium', label: 'Chromium', versions: [
@@ -117,6 +141,12 @@ export default function PlanDetail() {
   const [runBrowsers, setRunBrowsers] = useState([]);
   const [browsersSaving, setBrowsersSaving] = useState(false);
   const [triggerMode, setTriggerMode] = useState('immediate'); // 'immediate' | 'scheduled'
+  const [notifyWebhookUrl, setNotifyWebhookUrl] = useState('');
+  const [notifyWebhookFocus, setNotifyWebhookFocus] = useState(false);
+  const [notifyOnCreated, setNotifyOnCreated] = useState(true);
+  const [notifyOnSuccess, setNotifyOnSuccess] = useState(true);
+  const [notifyOnFailure, setNotifyOnFailure] = useState(true);
+  const [notifySaving, setNotifySaving] = useState(false);
   // 计划名编辑
   const [editingName, setEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
@@ -134,6 +164,10 @@ export default function PlanDetail() {
         setRunBrowsers(Array.isArray(normalized.run_browsers) ? [...normalized.run_browsers] : []);
         setTriggerMode(normalized.schedule_enabled ? 'scheduled' : 'immediate');
         setScheduleCron(normalized.schedule_cron || '');
+        setNotifyWebhookUrl(normalized.notify_webhook_url || '');
+        setNotifyOnCreated(normalized.notify_on_created == null || !!Number(normalized.notify_on_created));
+        setNotifyOnSuccess(normalized.notify_on_success == null || !!Number(normalized.notify_on_success));
+        setNotifyOnFailure(normalized.notify_on_failure == null || !!Number(normalized.notify_on_failure));
       })
       .catch((err) => setPlanLoadError(err?.message || '加载失败'));
   };
@@ -197,6 +231,27 @@ export default function PlanDetail() {
         setTimeout(() => setToast(null), 2000);
       })
       .finally(() => setBrowsersSaving(false));
+  };
+
+  const saveNotify = () => {
+    setNotifySaving(true);
+    authFetch(API + '/plans/' + id + '/notify', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        notify_webhook_url: notifyWebhookUrl.trim() || null,
+        notify_on_created: notifyOnCreated,
+        notify_on_success: notifyOnSuccess,
+        notify_on_failure: notifyOnFailure,
+      }),
+    })
+      .then(() => {
+        setToast('通知设置已保存');
+        setTimeout(() => setToast(null), 2000);
+        refreshPlan();
+      })
+      .catch(() => setToast('通知设置保存失败'))
+      .finally(() => setNotifySaving(false));
   };
 
   const saveSchedule = (opts = {}) => {
@@ -516,6 +571,43 @@ export default function PlanDetail() {
             )}
             {browsersSaving && <span className="card-muted" style={{ fontSize: '0.8125rem', display: 'block', marginTop: '0.35rem' }}>保存中…</span>}
           </div>
+        </div>
+      </div>
+
+      <div className="card plan-detail-block">
+        <div className="section-title">消息通知</div>
+        <div className="plan-detail-notify-fields">
+          <label className="auth-form__field plan-detail-notify-field">
+            <span>群机器人 Webhook 地址</span>
+            <input
+              type="text"
+              className="plan-detail-notify-input"
+              value={notifyWebhookFocus ? notifyWebhookUrl : maskWebhookUrlForDisplay(notifyWebhookUrl)}
+              onChange={(e) => setNotifyWebhookUrl(e.target.value)}
+              onFocus={() => setNotifyWebhookFocus(true)}
+              onBlur={() => setNotifyWebhookFocus(false)}
+              placeholder="https://365.kdocs.cn/woa/api/v1/webhook/send?key=…"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <div className="plan-detail-notify-toggles">
+            <label className="plan-detail-notify-check">
+              <input type="checkbox" checked={notifyOnCreated} onChange={(e) => setNotifyOnCreated(e.target.checked)} />
+              <span>任务创建时通知</span>
+            </label>
+            <label className="plan-detail-notify-check">
+              <input type="checkbox" checked={notifyOnSuccess} onChange={(e) => setNotifyOnSuccess(e.target.checked)} />
+              <span>执行成功时通知</span>
+            </label>
+            <label className="plan-detail-notify-check">
+              <input type="checkbox" checked={notifyOnFailure} onChange={(e) => setNotifyOnFailure(e.target.checked)} />
+              <span>执行失败 / 取消时通知</span>
+            </label>
+          </div>
+          <button type="button" className="btn btn-primary plan-detail-notify-save" onClick={saveNotify} disabled={notifySaving}>
+            {notifySaving ? '保存中…' : '保存通知设置'}
+          </button>
         </div>
       </div>
 

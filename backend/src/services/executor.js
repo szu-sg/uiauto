@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { parse as dotenvParse } from 'dotenv';
 import PQueue from 'p-queue';
-import { notifyRunFinished } from './collaborationNotify.js';
+import { notifyRunFinished, mentionIdsForRun } from './collaborationNotify.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPOS_DIR = path.join(__dirname, '../../repos');
@@ -67,14 +67,14 @@ async function injectAuthFromEnv(repoDir) {
       continue;
     }
   }
-  if (!content) {
-    console.warn('[Executor] 未找到 run.env 或 .env，跳过登录态注入。请配置 backend/data/run.env 或 backend/data/.env 中的 WPS_SID');
-    return;
-  }
-  const parsed = dotenvParse(content);
-  const wpsSid = parsed.WPS_SID && String(parsed.WPS_SID).trim();
+  const parsed = content ? dotenvParse(content) : {};
+  const wpsSid =
+    (parsed.WPS_SID && String(parsed.WPS_SID).trim()) ||
+    (process.env.WPS_SID && String(process.env.WPS_SID).trim());
   if (!wpsSid) {
-    console.warn('[Executor] 未在 .env/run.env 中找到 WPS_SID，跳过登录态注入');
+    console.warn(
+      '[Executor] 未找到 WPS_SID（请在 data/run.env、data/.env 或进程环境中配置），跳过 auth.json 注入'
+    );
     return;
   }
 
@@ -87,6 +87,7 @@ async function injectAuthFromEnv(repoDir) {
         cwd: repoDir,
         shell: false,
         stdio: 'pipe',
+        env: { ...process.env, WPS_SID: wpsSid },
       });
       let err = '';
       child.stderr.on('data', (d) => { err += d.toString(); });
@@ -379,7 +380,15 @@ export function executePlan(runId, plan) {
             passed = db.prepare('SELECT COUNT(*) AS n FROM run_cases WHERE run_id = ? AND status = ?').get(runId, 'passed')?.n ?? 0;
             total = db.prepare('SELECT COUNT(*) AS n FROM run_cases WHERE run_id = ?').get(runId)?.n ?? 0;
           }
-          notifyRunFinished({ runId, planName: plan.name, status, passed, total, ...extra }).catch(() => {});
+          notifyRunFinished({
+            runId,
+            plan,
+            status,
+            passed,
+            total,
+            mentionUserIds: mentionIdsForRun(runId, plan),
+            ...extra,
+          }).catch((e) => console.warn('[CollaborationNotify] notifyRunFinished 异常:', e?.message || e));
         } catch (_) {}
       };
 
@@ -557,7 +566,13 @@ export function executePlan(runId, plan) {
       console.error('[Executor] runId=%s error:', runId, msg);
       setRunStatus.run('failed', `执行失败: ${msg}`, runId);
       try {
-        notifyRunFinished({ runId, planName: plan.name, status: 'failed', errorHint: msg }).catch(() => {});
+        notifyRunFinished({
+          runId,
+          plan,
+          status: 'failed',
+          errorHint: msg,
+          mentionUserIds: mentionIdsForRun(runId, plan),
+        }).catch((e) => console.warn('[CollaborationNotify] notifyRunFinished 异常:', e?.message || e));
       } catch (_) {}
     }
   });

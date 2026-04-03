@@ -3,8 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authFetch } from '../authApi';
 
 const API = '/api';
-/** 示例按钮填入的占位 Token，用户可替换为自己的 ghp_xxx（私有仓库拉取用） */
-const DEFAULT_GITHUB_TOKEN = 'ghp_xxx';
+/** 示例流程不预填 Token；私有仓库请在输入框粘贴自己的 PAT（勿提交到仓库） */
+const DEFAULT_GITHUB_TOKEN = '';
 
 export default function PlanNew() {
   const navigate = useNavigate();

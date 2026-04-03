@@ -40,6 +40,12 @@ function Nav({ user, onLogout }) {
   const path = useLocation().pathname;
   const planActive = path === '/' || path.startsWith('/plans');
   const reportActive = path === '/reports' || path.startsWith('/runs');
+  const hasUid = user?.uid != null && String(user.uid).trim() !== '';
+  const nickname = (user?.real_name || '').trim();
+  const accountLabel = hasUid
+    ? `${nickname || user?.username || ''} · ${String(user.uid).trim()}`.trim()
+    : user?.username || '';
+  const avatarTitle = accountLabel || user?.username || '';
   return (
     <nav className="app-nav">
       <Link to="/" className="brand">UIAuto</Link>
@@ -48,12 +54,12 @@ function Nav({ user, onLogout }) {
       <div className="app-nav__trailer">
         <ServerStatus />
         <div className="app-nav__account">
-          <span className="app-nav__avatar" title={user?.username} aria-hidden>
+          <span className="app-nav__avatar" title={avatarTitle} aria-hidden>
             <svg className="app-nav__avatar-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
             </svg>
           </span>
-          <span className="app-nav__user">{user?.username}</span>
+          <span className="app-nav__user">{accountLabel}</span>
           <button type="button" className="btn btn-secondary app-nav__logout" onClick={onLogout}>
             退出
           </button>

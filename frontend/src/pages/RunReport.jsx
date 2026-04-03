@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 
 import { authFetch } from '../authApi';
@@ -47,8 +47,10 @@ export default function RunReport() {
   const [run, setRun] = useState(null);
   const [polling, setPolling] = useState(true);
   const [toast, setToast] = useState(null);
-  const [activeBrowserTab, setActiveBrowserTab] = useState(null); // 当前选中的浏览器 tab key
+  const [activeBrowserTab, setActiveBrowserTab] = useState(null);
   const [casePage, setCasePage] = useState(1);
+  const [liveLogOpen, setLiveLogOpen] = useState(true);
+  const liveLogRef = useRef(null);
   const CASE_PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -66,6 +68,13 @@ export default function RunReport() {
     const t = setInterval(fetchRun, 1000);
     return () => clearInterval(t);
   }, [id, polling]);
+
+  // 实时日志自动滚到底部
+  useEffect(() => {
+    if (liveLogRef.current && liveLogOpen) {
+      liveLogRef.current.scrollTop = liveLogRef.current.scrollHeight;
+    }
+  }, [run?.log_text, liveLogOpen]);
 
   const copyReportId = (e) => {
     e.preventDefault();
@@ -92,10 +101,13 @@ export default function RunReport() {
   const total = cases.length;
   const passed = cases.filter((c) => c.status === 'passed').length;
   const doneCount = cases.filter((c) => c.status === 'passed' || c.status === 'failed').length;
+  const runningCount = cases.filter((c) => c.status === 'running').length;
   const phaseLabels = { cloning: '正在克隆仓库', installing: '正在安装依赖', running: '正在执行用例' };
   const progressPhaseLabel = phaseLabels[run.progress_phase] || run.progress_phase;
   const progressText = run.status === 'running' && progressPhaseLabel
-    ? (run.progress_phase === 'running' && total > 0 ? `${progressPhaseLabel}（已完成 ${doneCount}/${total}）` : progressPhaseLabel)
+    ? (run.progress_phase === 'running' && total > 0
+      ? `${progressPhaseLabel}（已完成 ${doneCount}/${total}${runningCount > 0 ? `，${runningCount} 条执行中` : ''}）`
+      : progressPhaseLabel)
     : null;
   const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
   const totalMs = cases.reduce((s, c) => s + (c.duration_ms || 0), 0);
@@ -178,6 +190,30 @@ export default function RunReport() {
         <div className="card run-report-fail-reason" role="alert">
           <h3 className="run-report-fail-reason__title">失败原因</h3>
           <pre className="run-report-fail-reason__text">{run.log_text}</pre>
+        </div>
+      )}
+
+      {run.status === 'running' && (
+        <div className="card run-live-log">
+          <div className="run-live-log__header" onClick={() => setLiveLogOpen((v) => !v)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span className="run-live-log__dot" aria-hidden="true" />
+            <span className="run-live-log__title">实时日志</span>
+            <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-muted, #888)' }}>{liveLogOpen ? '收起' : '展开'}</span>
+          </div>
+          {liveLogOpen && (
+            <pre
+              ref={liveLogRef}
+              className="run-live-log__body"
+              aria-live="polite"
+              aria-label="实时执行日志"
+            >
+              {run.log_text
+                ? run.log_text
+                : (progressText
+                  ? `${progressText}\n\n（Playwright 尚未输出内容，请稍候…）`
+                  : '等待 Playwright 输出…')}
+            </pre>
+          )}
         </div>
       )}
 
@@ -312,8 +348,8 @@ export default function RunReport() {
                             <tr key={c.id}>
                               <td className="run-report-case-path" title={c.case_path}>{c.case_display_name || c.case_path}</td>
                               <td>
-                                <span className={'badge badge-' + (c.status === 'passed' ? 'passed' : c.status === 'failed' ? 'failed' : 'pending')}>
-                                  {c.status === 'passed' ? '通过' : c.status === 'failed' ? '失败' : c.status}
+                                <span className={'badge badge-' + (c.status === 'passed' ? 'passed' : c.status === 'failed' ? 'failed' : c.status === 'running' ? 'running' : 'pending')}>
+                                  {c.status === 'passed' ? '通过' : c.status === 'failed' ? '失败' : c.status === 'running' ? '执行中' : c.status}
                                 </span>
                               </td>
                               <td>{formatDurationMmSs(c.duration_ms)}</td>

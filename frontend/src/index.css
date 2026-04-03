@@ -136,7 +136,7 @@ a:hover {
   padding: 1.75rem;
 }
 .auth-card__title {
-  margin: 0 0 0.5rem;
+  margin: 0 0 1.75rem;
   font-size: 1.35rem;
 }
 .auth-card__hint {
@@ -155,13 +155,64 @@ a:hover {
   font-size: 0.85rem;
   color: #a1a1aa;
 }
+/* 与 #root 全局输入框同一底色 #27272a，避免用户名复合框(#18181b)与密码框(被 #root 覆盖为 #27272a)不一致 */
 .auth-form__field input {
   padding: 0.55rem 0.65rem;
   border-radius: 6px;
   border: 1px solid #3f3f46;
-  background: #18181b;
+  background: #27272a;
   color: #e4e4e7;
   font-size: 1rem;
+}
+.auth-form__field input:-webkit-autofill,
+.auth-form__field input:-webkit-autofill:hover,
+.auth-form__field input:-webkit-autofill:focus,
+.auth-form__field input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #27272a inset !important;
+  -webkit-text-fill-color: #e4e4e7 !important;
+  caret-color: #e4e4e7;
+}
+.auth-form__wps-email {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 6px;
+  border: 1px solid #3f3f46;
+  background: #27272a;
+  overflow: hidden;
+}
+.auth-form__wps-email:focus-within {
+  outline: none;
+  border-color: #7c3aed;
+}
+.auth-form__wps-email-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #e4e4e7;
+  font-size: 1rem;
+}
+.auth-form__wps-email-input:-webkit-autofill,
+.auth-form__wps-email-input:-webkit-autofill:hover,
+.auth-form__wps-email-input:-webkit-autofill:focus,
+.auth-form__wps-email-input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #27272a inset !important;
+  -webkit-text-fill-color: #e4e4e7 !important;
+  caret-color: #e4e4e7;
+}
+.auth-form__wps-email-suffix {
+  flex-shrink: 0;
+  padding-right: 0.65rem;
+  color: #a1a1aa;
+  font-size: 1rem;
+  user-select: none;
+}
+.auth-form__field-hint {
+  font-size: 0.8rem;
+  color: #71717a;
 }
 .auth-form__error {
   padding: 0.5rem 0.65rem;
@@ -798,6 +849,50 @@ a:hover {
 }
 .plan-detail-combo-chip__remove:hover:not(:disabled) {
   color: #f87171;
+}
+
+/* 计划详情：消息通知 */
+.plan-detail-notify-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 36rem;
+}
+.plan-detail-notify-field {
+  margin-bottom: 0;
+}
+.plan-detail-notify-input {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid #3f3f46;
+  background: #27272a;
+  color: #e4e4e7;
+  font-size: 0.875rem;
+}
+.plan-detail-notify-input:focus {
+  outline: none;
+  border-color: #7c3aed;
+}
+.plan-detail-notify-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0.25rem 0 0.35rem;
+}
+.plan-detail-notify-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  color: #d4d4d8;
+  cursor: pointer;
+}
+.plan-detail-notify-save {
+  width: 100%;
+  max-width: 36rem;
+  text-align: center;
+  justify-content: center;
 }
 
 /* 触发方式：卡片式二选一 */
@@ -1457,6 +1552,49 @@ ul {
 }
 .run-report-progress::before { content: '· '; color: #71717a; }
 .run-report-live-hint { color: #71717a; font-size: 0.8125rem; }
+
+/* 实时日志面板 */
+.run-live-log {
+  border-color: #1e3a5f;
+  background: rgba(30, 58, 95, 0.18);
+  padding: 0.75rem 1rem;
+}
+.run-live-log__header {
+  margin-bottom: 0;
+  user-select: none;
+}
+.run-live-log__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #38bdf8;
+  animation: live-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.run-live-log__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #7dd3fc;
+}
+.run-live-log__body {
+  margin: 0.75rem 0 0 0;
+  padding: 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: #d4d4d8;
+  background: #0f172a;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
 
 .run-report-fail-reason {
   border-color: #7f1d1d;
