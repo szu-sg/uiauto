@@ -1,0 +1,5 @@
+{
+  "version": "1.2.4",
+  "minPlatformVersion": "1.0.0",
+  "changelog": "修复保存时 Cookie 无法同步：停止录制后仍可拉取；增强 kdocs 域 Cookie 读取"
+}

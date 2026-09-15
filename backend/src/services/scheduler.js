@@ -7,7 +7,7 @@ const jobs = new Map();
 
 function triggerRun(planId) {
   const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(planId);
-  if (!plan || !plan.schedule_enabled) return;
+  if (!plan || !plan.schedule_enabled || plan.enabled === 0) return;
   const r = db.prepare(
     "INSERT INTO runs (plan_id, status, triggered_by_user_id, created_at) VALUES (?, ?, ?, datetime('now', '+8 hours'))"
   ).run(planId, 'pending', plan.user_id);
@@ -25,10 +25,15 @@ function triggerRun(planId) {
     console.warn('[CollaborationNotify] notifyRunStarted 调用失败:', e?.message || e);
   }
   console.log('[Scheduler] 定时执行: 计划 #%s, 运行 #%s', planId, newRunId);
+  if (plan.schedule_once) {
+    db.prepare('UPDATE plans SET schedule_enabled = 0, schedule_once = 0 WHERE id = ?').run(planId);
+    update(planId, { schedule_enabled: false, schedule_cron: plan.schedule_cron || null });
+    console.log('[Scheduler] 单次定时已执行，计划 #%s 定时已关闭', planId);
+  }
 }
 
 export function loadAll() {
-  const rows = db.prepare("SELECT id, schedule_cron FROM plans WHERE schedule_enabled = 1 AND schedule_cron IS NOT NULL AND schedule_cron != ''").all();
+  const rows = db.prepare("SELECT id, schedule_cron FROM plans WHERE enabled = 1 AND schedule_enabled = 1 AND schedule_cron IS NOT NULL AND schedule_cron != ''").all();
   for (const row of rows) {
     try {
       const job = cron.schedule(row.schedule_cron, () => triggerRun(row.id));

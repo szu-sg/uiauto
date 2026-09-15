@@ -1,161 +1,98 @@
-# UIAuto - Playwright 测试计划 MVP
+# UIAuto - Playwright 自动化测试平台
 
-从 GitHub 拉取 Playwright 用例、组建测试计划、执行并查看报告（步骤、截图、录屏、日志）。
+用例录制、用例仓库、测试计划、执行报告与协作通知。支持 **WPS 企业 SSO** 多人登录，数据按用户隔离。
 
 ## 功能
 
-1. **拉取用例**：填写 GitHub 仓库（owner/repo/branch），拉取 `.spec.ts` / `.spec.js` 等用例列表；可选 GitHub Token（私有仓库）。
-2. **测试计划**：勾选用例、填写计划名称，创建计划。
-3. **执行计划**：在计划详情页点击「执行测试计划」，后台按顺序运行 Playwright 测试。
-4. **测试报告**：查看每次运行的用例结果、截图、录屏、日志。
+1. **用例录制**：浏览器插件 + 工作台录制，生成 Playwright 脚本
+2. **用例仓库**：管理录制/导入的用例，试跑与编辑
+3. **执行环境**：配置 base_url、账号、SwitchHosts 等
+4. **测试计划**：勾选用例、定时执行、协作群通知
+5. **测试报告**：步骤、截图、录屏、日志
 
-## 环境要求
+> 平台化改造（去 Git、统一导入、MCP）见 [docs/顶层设计-用例平台化.md](docs/顶层设计-用例平台化.md)
 
-- Node.js 18+
-- 已安装 Playwright 浏览器：在**用例仓库根目录**或本机全局需能执行 `npx playwright test`（执行时会 clone 仓库到 `backend/repos`，并在该目录下执行测试，故该目录下需有 `package.json` 且含 playwright 依赖，或系统已全局安装 playwright）。
+## 登录与多人协作（WPS SSO）
 
-## 登录与多用户
+- 与 **CSR 质量评测** 相同：未登录自动跳转 **WPS 企业 OAuth2**
+- 每位用户独立拥有：用例、环境、计划、执行记录
+- **首个 SSO 登录**用户为超级管理员，并继承无归属的历史计划
+- 注册已关闭；密码登录仅保留 API 兼容
 
-- **首次部署**：打开站点会进入登录页，点击「注册管理员账号」创建第一个用户；该用户会自动继承数据库里尚未归属的测试计划（`user_id` 为空的历史计划）。
-- **后续用户**：任选其一  
-  - 设置 **`UIAUTO_INVITE_CODE`**，同事在注册页填写该邀请码；或  
-  - 纯内网可设 **`UIAUTO_OPEN_REGISTER=1`**，无需邀请码即可注册（慎用）。
-- 未配置上述任一项时，打开注册页会显示说明，**不再自动跳回登录**。
-- **JWT**：生产环境请设置 **`JWT_SECRET`**（随机长字符串），勿使用默认值。
-- 每个用户只能看到、执行、删除**自己的**计划与对应执行记录。
+### 环境变量（`backend/.env`，参考 `backend/.env.example`）
 
-## 金山协作群通知（可选 · Webhook）
+| 变量 | 说明 |
+|------|------|
+| `JWT_SECRET` | 生产必填，随机长字符串 |
+| `WPS_APPID` / `WPS_APPKEY` | WPS 开放平台应用凭证 |
+| `WPS_REDIRECT_URI` | OAuth 回调，须与平台登记**完全一致**（含尾斜杠） |
+| `WPS_SUPER_ADMIN_EMAILS` | 可选，逗号分隔，指定邮箱首次登录为超管 |
 
-在**测试计划详情页**可配置：发到哪个群（该群机器人的 **Webhook 地址**），以及「任务创建 / 成功 / 失败·取消」是否推送。**@ 提醒**会自动指向**触发本次运行的人**（手动执行 = 当前用户；定时任务 = 计划负责人），使用其账号在注册时填写的 **UID**（`users.uid`，需与金山协作侧一致）。未填计划级 Webhook 时，回退使用服务器环境变量里的默认地址。
+**回调地址示例：**
 
-全局默认（可选）：
+- 本地 Vite：`http://localhost:5180/`
+- 生产：`http://<服务器IP>:3001/`
 
-- `WPS_WEBHOOK_URL`：默认群机器人 Webhook  
-- `WPS_NOTIFY_ENABLED=1`：是否启用全局默认 URL；设为 `0` / `false` / `no` 可关闭（计划里单独填了 Webhook 仍会发到该群）  
-- `UIAUTO_PUBLIC_BASE_URL`：站点根地址（无尾斜杠），用于消息里的「查看报告」链接  
+### 本地开发免登录（可选）
 
-说明见 [金山协作 · 机器人 Webhook](https://365.kdocs.cn/3rd/open/documents/app-integration-dev/guide/robot/webhook)。
+仅 `npm run dev` 时生效，**不影响生产构建**：
+
+```bash
+# frontend/.env.local
+VITE_AUTH_DISABLED=true
+```
+
+后端调试可设 `AUTH_DISABLED=1`（勿用于生产）。
 
 ## 快速开始
 
-### 1. 安装依赖
-
 ```bash
 npm run install:all
+cp backend/.env.example backend/.env   # 按需修改 SSO
+npm run dev                             # 前端 :5180 + 后端 :3001
 ```
 
-或分别安装：
+浏览器打开 http://localhost:5180 ，将跳转 WPS 登录。
 
-```bash
-npm install
-cd backend && npm install
-cd ../frontend && npm install
+### 本机调试（录制页「一键运行」）
+
+每位测试同学需在本机配置一次 **Local Runner**（平台内打开 **用例录制 → 配置本机运行器**，或访问 `/local-runner`）：
+
+1. 安装 [Node.js 18+](https://nodejs.org/)
+2. 下载「本机运行器 ZIP」并解压（或克隆仓库后在根目录执行 `npm run local-runner:install`）
+3. Windows：双击 `install.bat` → `start.bat`；Mac/Linux：`npm install` → `npm start`
+4. 保持运行器终端开启，回到平台点击「一键运行」
+
+运行器默认监听 `http://127.0.0.1:9321`，与平台部署地址无关（远程访问平台也会连本机）。
+
+## 示例用例（试流程）
+
+仓库内置可执行 Playwright 冒烟用例与 ZIP 包，见 **[fixtures/sample-cases/README.md](fixtures/sample-cases/README.md)**。
+
+```powershell
+python scripts/build_fixture_zips.py    # 生成 ZIP
+python scripts/import_fixtures.py       # 可选：一键导入到服务器（需 DEPLOY_PASSWORD）
 ```
 
-### 2. 启动后端（端口 3001）
+## 部署
 
-```bash
-npm run backend
+见 [docs/Ubuntu部署指南.md](docs/Ubuntu部署指南.md)。Windows 一键部署服务器：
+
+```powershell
+$env:DEPLOY_PASSWORD='...'; python scripts/deploy_server.py
 ```
-
-### 3. 启动前端（端口 5173）
-
-```bash
-npm run frontend
-```
-
-或同时启动前后端：
-
-```bash
-npm run dev
-```
-
-### 4. 使用
-
-1. 打开 http://localhost:5173
-2. 点击「新建计划」→ 填写 GitHub owner/repo（如 `microsoft/playwright`）→「拉取用例列表」
-3. 勾选用例、填写计划名称 →「创建计划」
-4. 在计划详情页点击「执行测试计划」→ 自动跳转到报告页；报告页会轮询直到执行完成，可展开每条用例查看截图、录屏、日志。
 
 ## 项目结构
 
 ```
 uiauto/
-├── backend/           # Node 后端
-│   ├── src/
-│   │   ├── index.js       # Express 入口
-│   │   ├── db/schema.js   # SQLite 表结构
-│   │   ├── routes/        # plans / runs / github API
-│   │   └── services/     # github 拉取、executor 执行
-│   ├── data/              # SQLite 数据库（自动创建）
-│   ├── repos/             # clone 的 GitHub 仓库（自动创建）
-│   └── results/           # 每次运行的截图/录屏/日志（自动创建）
-├── frontend/          # React + Vite
-│   └── src/
-│       ├── pages/         # Home, PlanNew, PlanDetail, RunReport
-│       └── App.jsx
-└── package.json
+├── backend/       # Express API、执行引擎、SQLite
+├── frontend/      # React 工作台
+├── extension/     # 录制浏览器插件
+├── docs/          # 设计与部署文档
+└── scripts/       # 部署脚本
 ```
 
-## API 摘要
+## 文档索引
 
-- `GET /api/plans` - 计划列表
-- `POST /api/plans` - 创建计划
-- `GET /api/plans/:id` - 计划详情
-- `GET /api/github/specs?owner=&repo=&branch=&token=` - 拉取仓库内用例文件列表
-- `GET /api/runs?planId=` - 某计划的运行列表
-- `POST /api/runs` - 创建并排队一次运行（body: `{ plan_id }`）
-- `GET /api/runs/:id` - 运行详情（含 cases）
-- 静态资源：`/results/:runId/:caseId/...` 为截图、录屏、日志文件
-
-## 部署到内网服务器（供同事通过 URL 访问）
-
-### 1. 在服务器上准备环境
-
-- 安装 Node.js 18+
-- 安装 Git（用于 clone 用例仓库）
-- 若需执行 Playwright 用例，需安装浏览器依赖：`npx playwright install chromium`（或安装 full 以支持多浏览器）
-
-### 2. 拉取代码并安装依赖
-
-```bash
-# 假设代码在 /opt/uiauto
-cd /opt/uiauto
-npm run install:all
-```
-
-### 3. 构建前端并启动服务
-
-```bash
-npm run build          # 将前端打包到 backend/public
-cd backend && npm start
-```
-
-默认监听 **0.0.0.0:3001**，内网其他机器可访问 `http://<服务器IP>:3001`。
-
-### 4. 可选：改端口或仅本机监听
-
-```bash
-PORT=8080 node src/index.js    # 使用 8080 端口
-HOST=127.0.0.1 node src/index.js  # 仅本机（不推荐内网共享时使用）
-```
-
-### 5. 可选：用 pm2 常驻
-
-```bash
-npm install -g pm2
-cd backend
-pm2 start src/index.js --name uiauto
-pm2 save && pm2 startup
-```
-
-### 访问方式
-
-- 内网同事浏览器打开：`http://<服务器IP>:3001`
-- 同一端口同时提供前端页面和 API，无需单独配置代理。
-
-## 说明
-
-- 执行为单任务队列，同一时间只跑一个计划。
-- 用例仓库需为标准 Playwright Test 项目（可 `npx playwright test <文件路径>` 执行）。
-- 报告中的「步骤」当前为执行日志摘要；更细的步骤可后续从 Playwright trace 解析。
+见 [docs/README.md](docs/README.md)

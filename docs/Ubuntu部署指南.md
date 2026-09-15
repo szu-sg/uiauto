@@ -79,15 +79,25 @@ npm run install:all
 
 ## 三、配置（可选）
 
-### 1. 账号与注册（多用户）
+### 1. WPS SSO 登录（多人协作）
 
-- **首个账号**：部署后浏览器打开站点 →「注册管理员」。
-- **开放注册（远端服务器常用）**：若当前未开放注册，在 **`backend/.env`** 中任选其一：
-  - **`UIAUTO_OPEN_REGISTER=1`**：内网开放注册，任何人可注册（无需邀请码），适合内网/测试环境。
-  - **`UIAUTO_INVITE_CODE=你的邀请码`**：仅持邀请码的用户可注册，适合需要管控的场景。
-- **生产务必设置** **`JWT_SECRET`**（随机字符串），否则 Token 易被伪造。
+复制 `backend/.env.example` 为 `backend/.env`，至少配置：
 
-修改 `.env` 后需**重启后端**（如 `pm2 restart uiauto`）生效。
+```env
+JWT_SECRET=请改为随机长字符串
+WPS_APPID=你的应用ID
+WPS_APPKEY=你的应用密钥
+WPS_REDIRECT_URI=http://<服务器IP>:3001/
+```
+
+- `WPS_REDIRECT_URI` 须在 **WPS 开放平台**登记，与访问地址**完全一致**（含尾斜杠）。
+- 用户通过 WPS 企业账号登录；**首个登录**者为超级管理员。
+- 每位用户只能看到、操作自己的用例、环境、计划与报告。
+- **切勿**在生产环境设置 `AUTH_DISABLED=1`；若 `backend/data/.env` 中有该行请删除。
+
+可选：`WPS_SUPER_ADMIN_EMAILS=admin@wps.cn,other@wps.cn`（逗号分隔，指定超管邮箱）。
+
+修改 `.env` 后需**重启后端**生效。
 
 ### 2. 登录态（执行需登录的用例时必配）
 
@@ -173,11 +183,12 @@ UIAUTO_PUBLIC_BASE_URL=https://你的域名或IP:3001
 
 ```env
 JWT_SECRET=请改为随机长字符串
-# 开放注册（二选一）：内网开放 或 邀请码
-UIAUTO_OPEN_REGISTER=1
-# UIAUTO_INVITE_CODE=公司内部邀请码
-# 服务端执行计划时不触发 sudo 密码（需先执行一次 sudo npx playwright install-deps chromium）
+WPS_APPID=你的应用ID
+WPS_APPKEY=你的应用密钥
+WPS_REDIRECT_URI=http://<服务器IP>:3001/
+# 服务端执行计划时不触发 sudo（需先 sudo npx playwright install-deps chromium）
 SKIP_PLAYWRIGHT_DEPS=1
+```
 # 可选：金山协作群 Webhook 通知
 # WPS_NOTIFY_ENABLED=1
 # WPS_WEBHOOK_URL=https://xz.wps.cn/api/v1/webhook/send?key=xxx

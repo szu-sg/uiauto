@@ -1,0 +1,12 @@
+{
+  "mode": "snapshot",
+  "name": "示例-Example域名",
+  "env_kind": "test",
+  "base_url": "https://example.com",
+  "headers": [],
+  "switchhosts_text": null,
+  "test_username": "",
+  "test_password": "",
+  "wps_company_name": "",
+  "extra_env": {}
+}

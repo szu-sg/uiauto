@@ -5,6 +5,15 @@ import { fileURLToPath } from 'url';
 import { parse as dotenvParse } from 'dotenv';
 import PQueue from 'p-queue';
 import { notifyRunFinished, mentionIdsForRun } from './collaborationNotify.js';
+import { hostsTextToChromiumHostResolverRules } from './switchhosts.js';
+import { filterEssentialStorageState } from '../utils/essentialCookies.js';
+import {
+  parseCaseMetadataObject,
+  resolveCaseSource,
+  repoWorkspaceKey,
+  recordedCasesRoot,
+  syncRecordedCaseForRun,
+} from './caseExecution.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPOS_DIR = path.join(__dirname, '../../repos');
@@ -19,8 +28,100 @@ const queue = new PQueue({ concurrency: 1 });
 /** 多浏览器/用例并行数（同时运行的 Playwright 进程数），可通过环境变量 RUN_CONCURRENCY 覆盖 */
 const RUN_CONCURRENCY = Math.max(1, parseInt(process.env.RUN_CONCURRENCY, 10) || 3);
 
+const EXTRA_ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** 与前端「环境类型」说明一致：测试需 SwitchHosts；灰度/私有化不需要；URL 习惯不同 */
+function executionTraitsForKind(kind) {
+  const k = kind === 'staging' || k === 'private' ? kind : 'test';
+  if (k === 'test') {
+    return {
+      switchHosts: true,
+      baseUrlTypical: 'https://365.kdocs.cn',
+      baseUrlNote: '测试环境通常配合本机 SwitchHosts；基础 URL 多与 hosts 中 365 文档域一致',
+    };
+  }
+  if (k === 'staging') {
+    return {
+      switchHosts: false,
+      baseUrlTypical: 'https://365.kdocs.cn',
+      baseUrlNote: '灰度无需 SwitchHosts；基础 URL 常见为文档域（如 365.kdocs.cn）',
+    };
+  }
+  return {
+    switchHosts: false,
+    baseUrlTypical: 'http(s)://<ip>:<port>',
+    baseUrlNote:
+      '私有化无需 SwitchHosts；基础 URL 多为内网 IP + 端口；若入口映射为文档域也可使用 365.kdocs.cn 等形式',
+  };
+}
+
+/**
+ * 将计划绑定的执行环境写入克隆仓库根目录的 .uiauto-execution.json，并返回需合并进 Playwright 子进程的环境变量。
+ * 用例可通过 process.env.UIAUTO_EXEC_CONFIG 读绝对路径加载完整 JSON；常用项同时注入 BASE_URL / E2E_*。
+ */
+async function prepareExecutionProfileForRepo(repoDir, row) {
+  const configPath = path.join(repoDir, '.uiauto-execution.json');
+  if (!row) {
+    await fs.unlink(configPath).catch(() => {});
+    return {};
+  }
+  let headers = [];
+  try {
+    const h = JSON.parse(row.headers_json || '[]');
+    if (Array.isArray(h)) headers = h;
+  } catch (_) {}
+  let extraEnv = {};
+  try {
+    const ex = JSON.parse(row.extra_env_json || '{}');
+    if (ex && typeof ex === 'object' && !Array.isArray(ex)) extraEnv = ex;
+  } catch (_) {}
+  const kind = row.env_kind || 'test';
+  const traits = executionTraitsForKind(kind);
+  let hostResolverRules = '';
+  const rawSwitch = row.switchhosts_text != null ? String(row.switchhosts_text).trim() : '';
+  if (kind === 'test' && rawSwitch) {
+    hostResolverRules = hostsTextToChromiumHostResolverRules(rawSwitch);
+    if (!hostResolverRules) {
+      console.warn(
+        '[Executor] 测试环境已填写 SwitchHosts 文本，但未解析出有效 IPv4 映射（需每行：IP 域名，# 可注释）'
+      );
+    }
+  }
+  const wpsCompany = row.wps_company_name != null ? String(row.wps_company_name).trim() : '';
+  const payload = {
+    kind,
+    baseUrl: row.base_url || '',
+    headers,
+    username: row.test_username || '',
+    password: row.test_password || '',
+    wpsCompanyName: wpsCompany,
+    extraEnv,
+    traits,
+    switchHostsRaw: kind === 'test' ? rawSwitch : '',
+    hostResolverRules,
+  };
+  await fs.writeFile(configPath, JSON.stringify(payload), 'utf8');
+  const out = {
+    UIAUTO_EXEC_CONFIG: configPath,
+    UIAUTO_ENV_KIND: payload.kind,
+    UIAUTO_SWITCHHOSTS_EXPECTED: traits.switchHosts ? '1' : '0',
+  };
+  if (hostResolverRules) {
+    out.UIAUTO_HOST_RESOLVER_RULES = hostResolverRules;
+  }
+  if (payload.baseUrl) out.BASE_URL = payload.baseUrl;
+  if (payload.username) out.E2E_USERNAME = payload.username;
+  if (payload.password) out.E2E_PASSWORD = payload.password;
+  if (wpsCompany) out.WPS_COMPANY_NAME = wpsCompany;
+  for (const [k, v] of Object.entries(extraEnv)) {
+    if (!EXTRA_ENV_KEY_RE.test(k) || v == null) continue;
+    out[k] = String(v);
+  }
+  return out;
+}
+
 /** 当前正在执行的任务，用于取消时 kill 子进程；children 在并行时会有多个 */
-const runningTask = { runId: null, child: null, children: new Set() };
+export const runningTask = { runId: null, child: null, children: new Set() };
 
 /** 供 /api/status 查询当前是否在执行及 runId */
 export function getRunningRunId() {
@@ -71,12 +172,7 @@ async function injectAuthFromEnv(repoDir) {
   const wpsSid =
     (parsed.WPS_SID && String(parsed.WPS_SID).trim()) ||
     (process.env.WPS_SID && String(process.env.WPS_SID).trim());
-  if (!wpsSid) {
-    console.warn(
-      '[Executor] 未找到 WPS_SID（请在 data/run.env、data/.env 或进程环境中配置），跳过 auth.json 注入'
-    );
-    return;
-  }
+  if (!wpsSid) return;
 
   const genAuthPath = path.join(repoDir, '.uiauto-gen-auth.cjs');
   const authPath = path.join(repoDir, 'auth.json');
@@ -90,6 +186,7 @@ async function injectAuthFromEnv(repoDir) {
         env: { ...process.env, WPS_SID: wpsSid },
       });
       let err = '';
+      child.stdout.on('data', () => {});
       child.stderr.on('data', (d) => { err += d.toString(); });
       child.on('close', (c) => resolve({ code: c, err }));
       child.on('error', reject);
@@ -115,8 +212,194 @@ async function injectAuthFromEnv(repoDir) {
   console.log('[Executor] 已从 run.env/.env 手写 auth.json 注入登录态');
 }
 
+/** 录制时同步的 Playwright storageState → auth.json（试跑优先使用） */
+async function injectRecordedStorageState(repoDir, storageState) {
+  const filtered = filterEssentialStorageState(storageState);
+  if (!filtered) return false;
+  const cookies = filtered.cookies;
+  const origins = filtered.origins;
+  if (!cookies.length && !origins.length) return false;
+
+  const normalized = {
+    cookies: cookies.map(normalizePlaywrightCookie).filter(Boolean),
+    origins,
+  };
+  if (!normalized.cookies.length && !normalized.origins.length) return false;
+
+  const authPath = path.join(repoDir, 'auth.json');
+  await fs.writeFile(authPath, JSON.stringify(normalized, null, 2), 'utf8');
+  console.log(`[Executor] 已写入录制登录态 auth.json（${normalized.cookies.length} 条 Cookie）`);
+  return true;
+}
+
+/**
+ * 纯 HTTP：若合并后的环境变量中有 UIAUTO_COOKIE_LOGIN_URL，且 E2E_USERNAME / E2E_PASSWORD 非空，
+ * 则 POST 该 URL，body 为 JSON { username, password }。期望响应为：
+ * { "cookies": [ { "name","value","domain","path", ... } ] }（与 Playwright storageState.cookies 字段兼容），
+ * 或根为 cookies 数组。可选 UIAUTO_COOKIE_LOGIN_HEADERS（JSON 对象字符串）附加请求头。
+ * 成功则写入仓库根 auth.json；若本步成功会覆盖此前 WPS 等方式生成的 auth.json。
+ */
+async function injectAuthFromCookieApi(repoDir, spawnEnvExtra) {
+  const env = { ...process.env, ...spawnEnvExtra };
+  const url = env.UIAUTO_COOKIE_LOGIN_URL && String(env.UIAUTO_COOKIE_LOGIN_URL).trim();
+  const username = env.E2E_USERNAME && String(env.E2E_USERNAME).trim();
+  const password = env.E2E_PASSWORD && String(env.E2E_PASSWORD).trim();
+  if (!url || !username || !password) return;
+
+  const authPath = path.join(repoDir, 'auth.json');
+  const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  const rawExtra = env.UIAUTO_COOKIE_LOGIN_HEADERS && String(env.UIAUTO_COOKIE_LOGIN_HEADERS).trim();
+  if (rawExtra) {
+    try {
+      const parsed = JSON.parse(rawExtra);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) Object.assign(headers, parsed);
+    } catch (_) {
+      console.warn('[Executor] UIAUTO_COOKIE_LOGIN_HEADERS 不是合法 JSON，已忽略');
+    }
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ username, password }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      console.warn(`[Executor] Cookie 登录接口 HTTP ${res.status}，未写入 auth.json`);
+      return;
+    }
+    const data = await res.json().catch(() => null);
+    if (!data) {
+      console.warn('[Executor] Cookie 登录接口响应非 JSON，未写入 auth.json');
+      return;
+    }
+    let cookies = [];
+    if (Array.isArray(data)) cookies = data;
+    else if (Array.isArray(data.cookies)) cookies = data.cookies;
+    else if (data.data && Array.isArray(data.data.cookies)) cookies = data.data.cookies;
+    if (!cookies.length) {
+      console.warn('[Executor] Cookie 登录接口未返回 cookies 数组，未写入 auth.json');
+      return;
+    }
+    const normalized = cookies.map(normalizePlaywrightCookie).filter(Boolean);
+    if (!normalized.length) {
+      console.warn('[Executor] Cookie 列表规范化后为空（需 name、domain），未写入 auth.json');
+      return;
+    }
+    const origins = Array.isArray(data.origins) ? data.origins : [];
+    const storageState = { cookies: normalized, origins };
+    await fs.writeFile(authPath, JSON.stringify(storageState, null, 2), 'utf8');
+    console.log('[Executor] 已通过 Cookie 登录接口写入 auth.json');
+  } catch (e) {
+    clearTimeout(timer);
+    console.warn('[Executor] Cookie 登录接口调用失败:', e?.message || e);
+  }
+}
+
+/**
+ * 执行前：若手机号(用户名)+密码+企业名称齐全，则调 WPS 账号 API 换 Cookie，写入仓库 auth.json（覆盖此前 WPS_SID / Cookie 接口结果）。
+ * 来源：执行环境 test_username / test_password / wps_company_name，或由合并环境变量 E2E_USERNAME、E2E_PASSWORD、WPS_COMPANY_NAME（如 run.env）。
+ */
+function resolveWpsLoginTriplet(execEnvRow, spawnEnvExtra) {
+  const env = { ...process.env, ...spawnEnvExtra };
+  const phone =
+    (execEnvRow?.test_username && String(execEnvRow.test_username).trim()) ||
+    (env.E2E_USERNAME && String(env.E2E_USERNAME).trim()) ||
+    '';
+  const password =
+    (execEnvRow?.test_password && String(execEnvRow.test_password)) ||
+    (env.E2E_PASSWORD && String(env.E2E_PASSWORD)) ||
+    '';
+  const company =
+    (execEnvRow?.wps_company_name && String(execEnvRow.wps_company_name).trim()) ||
+    (env.WPS_COMPANY_NAME && String(env.WPS_COMPANY_NAME).trim()) ||
+    '';
+  return { phone, password, company };
+}
+
+async function injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra) {
+  const { phone, password, company } = resolveWpsLoginTriplet(execEnvRow, spawnEnvExtra);
+  if (!phone || !password || !company) return;
+
+  let loginWpsAccountViaApi;
+  try {
+    ({ loginWpsAccountViaApi } = await import('./wpsAccountLogin.js'));
+  } catch (e) {
+    console.warn('[Executor] WPS 账号 API 登录不可用:', e?.message || e);
+    return;
+  }
+
+  const authPath = path.join(repoDir, 'auth.json');
+  try {
+    const { cookies } = await loginWpsAccountViaApi({
+      phone,
+      password,
+      companyName: company,
+    });
+    const normalized = cookies.map(normalizePlaywrightCookie).filter(Boolean);
+    if (!normalized.length) {
+      console.warn('[Executor] WPS 账号登录返回的 Cookie 规范化后为空，未写入 auth.json');
+      return;
+    }
+    const storageState = { cookies: normalized, origins: [] };
+    await fs.writeFile(authPath, JSON.stringify(storageState, null, 2), 'utf8');
+    console.log('[Executor] 已通过 WPS 账号 API 登录写入 auth.json（供 Playwright storageState）');
+  } catch (e) {
+    console.warn('[Executor] WPS 账号 API 登录失败:', e?.message || e);
+  }
+}
+
+function normalizePlaywrightCookie(c) {
+  if (!c || typeof c !== 'object') return null;
+  const name = c.name != null ? String(c.name).trim() : '';
+  const value = c.value != null ? String(c.value) : '';
+  const domain = c.domain != null ? String(c.domain).trim() : '';
+  const p = c.path != null ? String(c.path) : '/';
+  if (!name || !domain) return null;
+  const out = {
+    name,
+    value,
+    domain,
+    path: p || '/',
+    expires: -1,
+    httpOnly: false,
+    secure: true,
+    sameSite: 'Lax',
+  };
+  if (c.expires != null && c.expires !== '') {
+    const n = Number(c.expires);
+    if (!Number.isNaN(n)) out.expires = n;
+  }
+  if (typeof c.httpOnly === 'boolean') out.httpOnly = c.httpOnly;
+  if (typeof c.secure === 'boolean') out.secure = c.secure;
+  if (c.sameSite === 'Strict' || c.sameSite === 'Lax' || c.sameSite === 'None') out.sameSite = c.sameSite;
+  return out;
+}
+
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
+}
+
+/** 在仓库 .env 中写入/清除 UIAuto 注入的 UIAUTO_HOST_RESOLVER_RULES（供 dotenv + Playwright 读取） */
+const UIHOST_BLOCK_RE = /\n?# __UIAUTO_HOST_RESOLVER_START__\n[\s\S]*?# __UIAUTO_HOST_RESOLVER_END__\n?/g;
+
+async function mergeUiautoHostResolverIntoRepoDotEnv(repoDir, rulesOneLine) {
+  const envPath = path.join(repoDir, '.env');
+  let content = '';
+  try {
+    content = await fs.readFile(envPath, 'utf8');
+  } catch (_) {}
+  content = content.replace(UIHOST_BLOCK_RE, '\n');
+  if (rulesOneLine && String(rulesOneLine).trim()) {
+    const v = JSON.stringify(String(rulesOneLine).trim());
+    const block = `\n# __UIAUTO_HOST_RESOLVER_START__\nUIAUTO_HOST_RESOLVER_RULES=${v}\n# __UIAUTO_HOST_RESOLVER_END__\n`;
+    content = content.trimEnd() + block;
+  }
+  await fs.writeFile(envPath, content.trimEnd() + '\n', 'utf8');
 }
 
 /** 执行前强制无头：临时改写仓库内 playwright 配置的 headless 为 true，返回恢复函数 */
@@ -154,51 +437,61 @@ function withTimeout(promise, ms, message) {
 }
 
 /**
- * Clone or pull repo, return local path.
- * 带超时，超时或网络失败会抛错，避免一直卡在「正在克隆仓库」。
- * 若目录存在但非 git 仓库（如 .git 缺失），会删除后重新克隆。
+ * Clone or pull repo — 已废弃，计划执行不再 git clone。
  */
-async function ensureRepo(owner, repo, branch) {
-  const dir = path.join(REPOS_DIR, `${owner}_${repo}`);
-  await ensureDir(REPOS_DIR);
-  const git = (await import('simple-git')).default;
-  const gitImpl = git(REPOS_DIR);
 
-  const dirExists = await fs.access(dir).then(() => true).catch(() => false);
-  const hasGit = dirExists && await fs.access(path.join(dir, '.git')).then(() => true).catch(() => false);
-  if (dirExists && !hasGit) {
-    await fs.rm(dir, { recursive: true, force: true });
+/** 克隆仓库或准备录制 workspace 后，注入执行环境与登录态 */
+async function prepareRepoExecutionEnv(repoDir, execEnvRow) {
+  const repoEnv = path.join(repoDir, '.env');
+  try {
+    await fs.copyFile(RUN_ENV_PATH, repoEnv);
+  } catch (_) {
+    try {
+      await fs.copyFile(DATA_ENV_PATH, repoEnv);
+    } catch (_2) {}
   }
-
-  if (dirExists && hasGit) {
-    const g = git(dir);
-    await withTimeout(
-      (async () => {
-        await g.fetch();
-        await g.checkout(branch).catch(() => {});
-        await g.reset(['--hard', 'origin/' + branch]);
-      })(),
-      PULL_TIMEOUT_MS,
-      `拉取仓库超时（${PULL_TIMEOUT_MS / 1000} 秒）。请检查网络、代理或 GitHub 可达性。`
-    );
-    return dir;
-  }
-  const cloneUrl = `https://github.com/${owner}/${repo}.git`;
-  await withTimeout(
-    gitImpl.clone(cloneUrl, path.basename(dir), ['--branch', branch, '--single-branch']),
-    CLONE_TIMEOUT_MS,
-    `克隆仓库超时（${CLONE_TIMEOUT_MS / 1000} 秒）。请检查：1) 网络与代理；2) 仓库是否为私有（私有库需在本机配置 git 凭据）；3) 分支名是否正确。`
-  );
-  return dir;
+  const spawnEnvExtra = await prepareExecutionProfileForRepo(repoDir, execEnvRow);
+  await mergeUiautoHostResolverIntoRepoDotEnv(repoDir, spawnEnvExtra.UIAUTO_HOST_RESOLVER_RULES || '');
+  await injectAuthFromEnv(repoDir);
+  await injectAuthFromCookieApi(repoDir, spawnEnvExtra);
+  await injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra);
+  const restoreHeadless = await forceHeadlessInRepo(repoDir);
+  return { spawnEnvExtra, restoreHeadless };
 }
 
-function runCmd(cwd, command, args) {
+async function prepareRecordedWorkspace(execEnvRow) {
+  const repoDir = recordedCasesRoot();
+  await installRepoDeps(repoDir, { chromiumOnly: true });
+  const env = await prepareRepoExecutionEnv(repoDir, execEnvRow);
+  return { repoDir, kind: 'recorded', label: 'uiauto/recorded', ...env };
+}
+
+function attachChildToTask(child, taskRef) {
+  if (!taskRef) return () => {};
+  taskRef.child = child;
+  if (taskRef.children) taskRef.children.add(child);
+  return () => {
+    if (taskRef.child === child) taskRef.child = null;
+    if (taskRef.children) taskRef.children.delete(child);
+  };
+}
+
+/** 必须消费 stdout/stderr，否则 Windows 上 npm 等子进程会因管道缓冲区满而永久挂起 */
+function runCmd(cwd, command, args, taskRef = null) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, shell: true, stdio: 'pipe' });
+    const detach = attachChildToTask(child, taskRef);
     let err = '';
+    child.stdout.on('data', () => {});
     child.stderr.on('data', (d) => { err += d.toString(); });
-    child.on('close', (code) => resolve({ code, err }));
-    child.on('error', reject);
+    child.on('close', (code) => {
+      detach();
+      resolve({ code, err });
+    });
+    child.on('error', (err) => {
+      detach();
+      reject(err);
+    });
   });
 }
 
@@ -207,20 +500,78 @@ function skipPlaywrightWithDeps() {
   return ['1', 'true', 'yes'].includes(String(process.env.SKIP_PLAYWRIGHT_DEPS || '').toLowerCase());
 }
 
-async function installRepoDeps(repoDir) {
+const DEPS_READY_MARKER = '.uiauto-deps-ready';
+
+async function getDepsFingerprint(repoDir) {
+  const files = ['package.json', 'package-lock.json'];
+  let maxMtime = 0;
+  for (const name of files) {
+    try {
+      const st = await fs.stat(path.join(repoDir, name));
+      if (st.mtimeMs > maxMtime) maxMtime = st.mtimeMs;
+    } catch (_) {}
+  }
+  return maxMtime;
+}
+
+async function isRepoDepsReady(repoDir) {
+  const markerPath = path.join(repoDir, DEPS_READY_MARKER);
+  const pwTestPath = path.join(repoDir, 'node_modules', '@playwright', 'test', 'package.json');
+  try {
+    await fs.access(pwTestPath);
+    const markerStat = await fs.stat(markerPath);
+    const fp = await getDepsFingerprint(repoDir);
+    return markerStat.mtimeMs >= fp;
+  } catch {
+    return false;
+  }
+}
+
+async function markRepoDepsReady(repoDir) {
+  await fs.writeFile(
+    path.join(repoDir, DEPS_READY_MARKER),
+    `${new Date().toISOString()}\n`,
+    'utf8',
+  );
+}
+
+/**
+ * @param {string} repoDir
+ * @param {{ force?: boolean, chromiumOnly?: boolean }} [opts]
+ */
+async function installRepoDeps(repoDir, opts = {}) {
+  const { force = false, chromiumOnly = false, taskRef = null } = opts;
   const pkgPath = path.join(repoDir, 'package.json');
   try {
     await fs.access(pkgPath);
   } catch {
     return;
   }
-  await runCmd(repoDir, 'npm', ['install', '--no-audit', '--no-fund']);
-  const pwResult = !skipPlaywrightWithDeps()
-    ? await runCmd(repoDir, 'npx', ['playwright', 'install', '--with-deps'])
-    : await runCmd(repoDir, 'npx', ['playwright', 'install']);
-  if (pwResult.code !== 0) {
-    console.warn('[Executor] playwright install 未成功，用例可能报 Executable doesn\'t exist。请在服务器该仓库下执行: npx playwright install', pwResult.err || '');
+
+  if (!force && await isRepoDepsReady(repoDir)) {
+    return;
   }
+
+  console.log('[Executor] 安装依赖:', repoDir);
+  await runCmd(repoDir, 'npm', ['install', '--no-audit', '--no-fund', '--prefer-offline'], taskRef);
+
+  const pwInstallArgs = ['playwright', 'install'];
+  if (chromiumOnly) pwInstallArgs.push('chromium');
+  else if (!skipPlaywrightWithDeps()) pwInstallArgs.push('--with-deps');
+
+  const pwResult = await runCmd(repoDir, 'npx', pwInstallArgs, taskRef);
+  if (pwResult.code !== 0) {
+    console.warn(
+      '[Executor] playwright install 未成功，用例可能报 Executable doesn\'t exist。请在该目录执行: npx playwright install chromium',
+      pwResult.err || '',
+    );
+  }
+
+  await markRepoDepsReady(repoDir);
+  try {
+    const { linkCasesRootNodeModules } = await import('./caseWorkspace.js');
+    linkCasesRootNodeModules();
+  } catch (_) {}
 }
 
 /**
@@ -236,15 +587,17 @@ const BROWSER_TO_PROJECT = { chrome: 'chromium', msedge: 'chromium' };
  * taskRef: { runId, child?, children? } — child/children 用于取消时 kill；并行时使用 children
  * browser: string | null — 若指定则只在该 project 上跑（--project）；chrome/msedge 会回退为 chromium 以兼容仓库配置
  */
-function runPlaywrightTest(repoDir, casePath, runId, caseId, taskRef, browser = null) {
+function runPlaywrightTest(repoDir, casePath, runId, caseId, taskRef, browser = null, spawnEnvExtra = {}, runOpts = {}) {
   return new Promise((resolve, reject) => {
     const resultDir = path.join(RESULTS_DIR, String(runId), String(caseId));
     const outputInRepo = 'test-results-' + String(caseId);
+    const headed = !!runOpts.headed;
     const args = [
       'playwright', 'test', casePath,
       '--reporter=list',
       '--output', outputInRepo,
     ];
+    if (headed) args.push('--headed');
     const raw = browser ? String(browser).toLowerCase() : '';
     if (raw && SUPPORTED_BROWSERS.includes(raw)) {
       const project = BROWSER_TO_PROJECT[raw] ?? raw;
@@ -252,17 +605,23 @@ function runPlaywrightTest(repoDir, casePath, runId, caseId, taskRef, browser = 
     }
     const cwd = repoDir;
     const authFileInRepo = path.join(repoDir, 'auth.json');
+    const childEnv = {
+      ...process.env,
+      ...spawnEnvExtra,
+      PLAYWRIGHT_HTML_REPORT: resultDir,
+      AUTH_FILE: authFileInRepo,
+    };
+    if (headed) {
+      childEnv.PLAYWRIGHT_HEADLESS = '0';
+      delete childEnv.CI;
+    } else {
+      childEnv.CI = '1';
+      childEnv.PLAYWRIGHT_HEADLESS = '1';
+    }
     const child = spawn('npx', args, {
       cwd,
       shell: true,
-      env: {
-        ...process.env,
-        CI: '1',
-        PLAYWRIGHT_HTML_REPORT: resultDir,
-        PLAYWRIGHT_HEADLESS: '1',
-        // 显式指定 auth 文件绝对路径，确保 playwright.config 的 storageState 使用我们生成的 auth.json
-        AUTH_FILE: authFileInRepo,
-      },
+      env: childEnv,
     });
     const removeChild = () => {
       if (taskRef) {
@@ -332,7 +691,18 @@ async function findArtifacts(dir) {
           if (!out.screenshot) out.screenshot = full;
           out.screenshots.push(full);
         }
-        if ((lower.endsWith('.webm') || lower.endsWith('.mp4')) && !out.video) out.video = full;
+        if (lower.endsWith('.webm') || lower.endsWith('.mp4')) {
+          if (!out.video) out.video = full;
+          else {
+            try {
+              const cur = (await fs.stat(out.video)).size;
+              const next = (await fs.stat(full)).size;
+              if (next > cur) out.video = full;
+            } catch (_) {
+              out.video = full;
+            }
+          }
+        }
         if (lower.endsWith('.zip') && e.name.includes('trace') && !out.trace) out.trace = full;
       }
     }
@@ -365,215 +735,61 @@ export function cancelRun(runId) {
  */
 export function executePlan(runId, plan) {
   queue.add(async () => {
-    const { db } = await import('../db/schema.js');
-    const setRunStatus = db.prepare("UPDATE runs SET status = ?, started_at = COALESCE(started_at, datetime('now', '+8 hours')), finished_at = datetime('now', '+8 hours'), log_text = ?, progress_phase = NULL WHERE id = ?");
-    const updateRun = db.prepare("UPDATE runs SET status = ?, started_at = datetime('now', '+8 hours') WHERE id = ?");
-    const updateProgress = db.prepare('UPDATE runs SET progress_phase = ? WHERE id = ?');
-
-    try {
-      const id = Number(runId);
-      const sendFinish = (status, extra = {}) => {
-        try {
-          let passed;
-          let total;
-          if (status === 'done') {
-            passed = db.prepare('SELECT COUNT(*) AS n FROM run_cases WHERE run_id = ? AND status = ?').get(runId, 'passed')?.n ?? 0;
-            total = db.prepare('SELECT COUNT(*) AS n FROM run_cases WHERE run_id = ?').get(runId)?.n ?? 0;
-          }
-          notifyRunFinished({
-            runId,
-            plan,
-            status,
-            passed,
-            total,
-            mentionUserIds: mentionIdsForRun(runId, plan),
-            ...extra,
-          }).catch((e) => console.warn('[CollaborationNotify] notifyRunFinished 异常:', e?.message || e));
-        } catch (_) {}
-      };
-
-      const existing = db.prepare('SELECT status FROM runs WHERE id = ?').get(id);
-      if (existing && existing.status === 'cancelled') return;
-
-      // 先写入 run_cases，再克隆/安装依赖，这样中途取消时报告里也能看到用例列表（均为 pending）
-      const cases = JSON.parse(plan.cases_json || '[]');
-      if (!Array.isArray(cases) || cases.length === 0) {
-        setRunStatus.run('failed', '计划无用例，无法执行', runId);
-        sendFinish('failed', { errorHint: '计划无用例，无法执行' });
-        return;
-      }
-      let runBrowsers = null;
-      try {
-        if (plan.run_browsers_json) {
-          const arr = JSON.parse(plan.run_browsers_json);
-          if (Array.isArray(arr) && arr.length > 0) runBrowsers = arr;
-        }
-      } catch (_) {}
-
-      const updateCase = db.prepare(`
-        UPDATE run_cases SET status = ?, duration_ms = ?, error_message = ?, screenshot_path = ?, video_path = ?, trace_path = ?, log_path = ?, screenshots_json = ?
-        WHERE id = ?
-      `);
-      const insertCase = db.prepare(`
-        INSERT INTO run_cases (run_id, case_path, browser, status) VALUES (?, ?, ?, 'pending')
-      `);
-
-      /** 待执行任务：{ casePath, browser, caseRowId }，browser 为 null 表示不指定 project */
-      const tasks = [];
-      if (Array.isArray(runBrowsers) && runBrowsers.length > 0) {
-        const projects = runBrowsers.filter((b) => SUPPORTED_BROWSERS.includes(String(b).toLowerCase()));
-        for (const casePath of cases) {
-          for (const browser of projects) {
-            insertCase.run(runId, casePath, browser);
-            tasks.push({ casePath, browser, caseRowId: db.prepare('SELECT last_insert_rowid()').pluck().get() });
-          }
-        }
-      } else {
-        for (const casePath of cases) {
-          insertCase.run(runId, casePath, null);
-          tasks.push({ casePath, browser: null, caseRowId: db.prepare('SELECT last_insert_rowid()').pluck().get() });
-        }
-      }
-
-      // 队列一接手任务就标记为运行中
-      updateRun.run('running', runId);
-      runningTask.runId = id;
-      runningTask.child = null;
-      runningTask.children.clear();
-
-      const runCasesDir = path.join(RESULTS_DIR, String(runId));
-      await ensureDir(runCasesDir);
-
-      updateProgress.run('cloning', runId);
-      const repoDir = await ensureRepo(plan.repo_owner, plan.repo_name, plan.repo_branch || 'main');
-      if (db.prepare('SELECT status FROM runs WHERE id = ?').get(id)?.status === 'cancelled') {
-        runningTask.runId = null;
-        runningTask.child = null;
-        runningTask.children.clear();
-        try { updateProgress.run(null, runId); } catch (_) {}
-        sendFinish('cancelled');
-        return;
-      }
-
-      updateProgress.run('installing', runId);
-      await installRepoDeps(repoDir);
-
-      // 用例仓库内 .env 通常被 .gitignore，克隆后不存在。若配置了 data/run.env 或 data/.env，复制到仓库根供用例与生成脚本读取
-      const repoEnv = path.join(repoDir, '.env');
-      try {
-        await fs.copyFile(RUN_ENV_PATH, repoEnv);
-      } catch (_) {
-        try {
-          await fs.copyFile(DATA_ENV_PATH, repoEnv);
-        } catch (_2) {}
-      }
-
-      // Playwright 使用 storageState（如 auth.json）带登录态，不是直接读 .env。根据 .env 中的 WPS_SID 生成 auth.json
-      await injectAuthFromEnv(repoDir);
-
-      const afterSetup = db.prepare('SELECT status FROM runs WHERE id = ?').get(id);
-      if (afterSetup && afterSetup.status === 'cancelled') {
-        runningTask.runId = null;
-        runningTask.child = null;
-        runningTask.children.clear();
-        try { updateProgress.run(null, runId); } catch (_) {}
-        sendFinish('cancelled');
-        return;
-      }
-
-      updateProgress.run('running', runId);
-      const restoreHeadless = await forceHeadlessInRepo(repoDir);
-      const runQueue = new PQueue({ concurrency: RUN_CONCURRENCY });
-      const logChunks = [];
-
-      try {
-        await Promise.all(tasks.map((task) =>
-          runQueue.add(async () => {
-            const again = db.prepare('SELECT status FROM runs WHERE id = ?').get(id);
-            if (again && again.status === 'cancelled') return;
-
-            const { casePath, browser, caseRowId } = task;
-            const caseResultDir = path.join(runCasesDir, String(caseRowId));
-            const rel = (p) => (p ? path.relative(RESULTS_DIR, p).replace(/\\/g, '/') : null);
-            try {
-              await ensureDir(caseResultDir);
-              const start = Date.now();
-              let result = await runPlaywrightTest(repoDir, casePath, runId, caseRowId, runningTask, browser);
-              // 仓库若只配置了 chromium（firefox/webkit 被注释），请求 firefox/webkit 会报 Project(s) "firefox" not found，自动用 chromium 重试
-              const projectNotFound = result.code !== 0 && /Project\(s\)\s*"[^"]+"\s*not found[\s\S]*Available projects:/i.test(result.stderr);
-              if (projectNotFound && browser && browser.toLowerCase() !== 'chromium') {
-                result = await runPlaywrightTest(repoDir, casePath, runId, caseRowId, runningTask, 'chromium');
-                logChunks.push(`\n[${casePath}] 仓库未配置 "${browser}"，已用 chromium 重试\n`);
-              }
-              const duration = Date.now() - start;
-              const browserLabel = (projectNotFound && browser && browser.toLowerCase() !== 'chromium') ? 'chromium (fallback)' : (browser || 'default');
-              logChunks.push(`\n--- ${casePath} [${browserLabel}] (exit ${result.code}) ---\n${result.stdout}\n${result.stderr}\n`);
-
-              const fromResult = path.join(repoDir, 'test-results-' + String(caseRowId));
-              await copyArtifacts(fromResult, caseResultDir, casePath);
-              const artifacts = await findArtifacts(caseResultDir);
-              const logPath = path.join(caseResultDir, 'log.txt');
-              await fs.writeFile(logPath, result.stdout + '\n' + result.stderr, 'utf8');
-
-              const screenshotsJson = artifacts.screenshots.length
-                ? JSON.stringify(artifacts.screenshots.map((p) => rel(p)).filter(Boolean))
-                : null;
-              updateCase.run(
-                result.code === 0 ? 'passed' : 'failed',
-                duration,
-                result.code !== 0 ? result.stderr.slice(-500) : null,
-                rel(artifacts.screenshot),
-                rel(artifacts.video),
-                rel(artifacts.trace),
-                rel(logPath),
-                screenshotsJson,
-                caseRowId
-              );
-            } catch (taskErr) {
-              const msg = taskErr?.message || String(taskErr);
-              logChunks.push(`\n--- ${casePath} [${browser || 'default'}] (执行异常) ---\n${msg}\n`);
-              updateCase.run('failed', null, msg, null, null, null, null, null, caseRowId);
-            }
-          })
-        ));
-      } finally {
-        await restoreHeadless();
-      }
-
-      const logAcc = logChunks.join('');
-      runningTask.runId = null;
-      runningTask.child = null;
-      runningTask.children.clear();
-      updateProgress.run(null, runId);
-
-      const runLogPath = path.join(runCasesDir, 'run.log');
-      await fs.writeFile(runLogPath, logAcc, 'utf8');
-      const afterStatus = db.prepare('SELECT status FROM runs WHERE id = ?').get(id);
-      if (afterStatus && afterStatus.status === 'cancelled') {
-        setRunStatus.run('cancelled', '用户手动停止', runId);
-        sendFinish('cancelled');
-        return;
-      }
-      db.prepare("UPDATE runs SET status = 'done', finished_at = datetime('now', '+8 hours'), result_dir = ?, log_text = ?, progress_phase = NULL WHERE id = ?")
-        .run(path.relative(RESULTS_DIR, runCasesDir).replace(/\\/g, '/'), logAcc.slice(-2000), runId);
-      sendFinish('done');
-    } catch (err) {
-      runningTask.runId = null;
-      runningTask.child = null;
-      runningTask.children.clear();
-      try { updateProgress.run(null, runId); } catch (_) {}
-      const msg = err?.message || String(err);
-      console.error('[Executor] runId=%s error:', runId, msg);
-      setRunStatus.run('failed', `执行失败: ${msg}`, runId);
-      try {
-        notifyRunFinished({
-          runId,
-          plan,
-          status: 'failed',
-          errorHint: msg,
-          mentionUserIds: mentionIdsForRun(runId, plan),
-        }).catch((e) => console.warn('[CollaborationNotify] notifyRunFinished 异常:', e?.message || e));
-      } catch (_) {}
-    }
+    const { runPlanCases } = await import('./caseRunner.js');
+    await runPlanCases(runId, plan);
   });
 }
+
+/**
+ * 在指定仓库目录执行单个 Playwright 用例（供录制试跑等场景复用环境注入逻辑）。
+ */
+export async function runSingleCaseInRepo(repoDir, casePath, execEnvRow, options = {}) {
+  const {
+    runId = '0',
+    caseRowId = '0',
+    taskRef = null,
+    browser = null,
+    headed = false,
+    chromiumOnly = false,
+    forceDeps = false,
+    storageState = null,
+  } = options;
+
+  await installRepoDeps(repoDir, { chromiumOnly, force: forceDeps, taskRef });
+
+  const repoEnv = path.join(repoDir, '.env');
+  try {
+    await fs.copyFile(RUN_ENV_PATH, repoEnv);
+  } catch (_) {
+    try {
+      await fs.copyFile(DATA_ENV_PATH, repoEnv);
+    } catch (_2) {}
+  }
+
+  const spawnEnvExtra = await prepareExecutionProfileForRepo(repoDir, execEnvRow);
+  await mergeUiautoHostResolverIntoRepoDotEnv(repoDir, spawnEnvExtra.UIAUTO_HOST_RESOLVER_RULES || '');
+  const hadRecordedAuth = await injectRecordedStorageState(repoDir, storageState);
+  if (!hadRecordedAuth) {
+    await injectAuthFromEnv(repoDir);
+    await injectAuthFromCookieApi(repoDir, spawnEnvExtra);
+    await injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra);
+  }
+
+  const restoreHeadless = headed ? (() => Promise.resolve()) : await forceHeadlessInRepo(repoDir);
+  try {
+    return await runPlaywrightTest(
+      repoDir,
+      casePath,
+      runId,
+      caseRowId,
+      taskRef,
+      browser,
+      spawnEnvExtra,
+      { headed },
+    );
+  } finally {
+    await restoreHeadless();
+  }
+}
+
+export { copyArtifacts, findArtifacts };

@@ -1,0 +1,97 @@
+:root {
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Menlo', monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.625rem;
+  --text-2xl: 2.25rem;
+
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  --leading-tight: 1.3;
+  --leading-normal: 1.6;
+  --tracking-tight: -0.02em;
+
+  /* Demo glass theme — indigo + soft lavender canvas */
+  --c-bg: #f7f8ff;
+  --c-bg-subtle: #eef2ff;
+  --c-surface: rgba(255, 255, 255, 0.85);
+  --c-surface-solid: #ffffff;
+  --c-surface-2: rgba(238, 242, 255, 0.6);
+  --c-surface-3: #eef2ff;
+
+  --c-sidebar: rgba(255, 255, 255, 0.85);
+  --c-sidebar-hover: rgba(238, 242, 255, 0.7);
+  --c-sidebar-active: rgba(99, 102, 241, 0.1);
+  --c-sidebar-text: #64748b;
+  --c-sidebar-text-active: #6366f1;
+
+  --c-text: #0f172a;
+  --c-text-muted: #64748b;
+  --c-text-faint: #94a3b8;
+  --c-text-inverse: #ffffff;
+
+  --c-border: rgba(255, 255, 255, 0.6);
+  --c-border-strong: rgba(226, 232, 240, 0.9);
+  --c-border-subtle: rgba(238, 242, 255, 0.8);
+
+  --c-accent: #6366f1;
+  --c-accent-hover: #4f46e5;
+  --c-accent-soft: rgba(99, 102, 241, 0.1);
+  --c-accent-ring: rgba(99, 102, 241, 0.3);
+
+  --c-success: #22c55e;
+  --c-success-bg: rgba(34, 197, 94, 0.1);
+  --c-danger: #ef4444;
+  --c-danger-bg: rgba(239, 68, 68, 0.1);
+  --c-warning: #f97316;
+  --c-warning-bg: rgba(249, 115, 22, 0.1);
+  --c-info: #60a5fa;
+  --c-info-bg: rgba(96, 165, 250, 0.1);
+
+  --c-code-bg: #1e293b;
+  --c-code-text: #e2e8f0;
+
+  --tone-blue: #6366f1;
+  --tone-green: #22c55e;
+  --tone-orange: #f97316;
+  --tone-sky: #38bdf8;
+
+  --sidebar-w: 224px;
+  --header-h: 72px;
+  --page-max: none;
+  --content-pad: 1.5rem;
+
+  --radius-sm: 12px;
+  --radius: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+
+  --shadow-float: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 22px rgba(15, 23, 42, 0.07);
+  --shadow-float-hover: 0 2px 6px rgba(15, 23, 42, 0.05), 0 14px 40px rgba(15, 23, 42, 0.11);
+
+  --shadow-glass: var(--shadow-float);
+  --shadow-glass-hover: var(--shadow-float-hover);
+
+  --shadow-xs: var(--shadow-float);
+  --shadow-sm: var(--shadow-float);
+  --shadow-md: var(--shadow-float-hover);
+  --shadow-lg: var(--shadow-float-hover);
+  --shadow-card: var(--shadow-float);
+  --shadow-panel: var(--shadow-float);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-normal: 280ms;
+
+  --c-accent-strong: var(--c-accent-hover);
+  --c-topbar-bg: var(--c-surface);
+}

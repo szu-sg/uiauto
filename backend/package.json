@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/index.js",
+    "dev": "node --watch-path=./src --watch src/index.js",
     "start": "node src/index.js"
   },
   "dependencies": {
+    "adm-zip": "^0.5.16",
+    "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.6.0",
     "cors": "^2.8.5",
@@ -14,9 +16,10 @@
     "dotenv": "^17.3.1",
     "express": "^4.21.1",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
-    "octokit": "^3.1.2",
     "p-queue": "^8.0.1",
-    "simple-git": "^3.27.0"
+    "playwright": "^1.49.1",
+    "ws": "^8.21.0"
   }
 }

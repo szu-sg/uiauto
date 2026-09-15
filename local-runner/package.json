@@ -1,0 +1,17 @@
+{
+  "name": "uiauto-local-runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "UIAuto local Playwright runner for case debugging",
+  "bin": {
+    "uiauto-local-runner": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "postinstall": "node scripts/ensure-workspace.js"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.49.1"
+  }
+}

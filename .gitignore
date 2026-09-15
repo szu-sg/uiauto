@@ -4,6 +4,16 @@ backend/data/
 backend/repos/
 backend/results/
 backend/public/
+backend/.env
 .env
+frontend/.env.local
 *.log
 .DS_Store
+
+# 本地运行器产物
+local-runner/node_modules/
+local-runner/workspace/
+local-runner/*.log
+
+# 工作区工具目录
+.wpscomate/

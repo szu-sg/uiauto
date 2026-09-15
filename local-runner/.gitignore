@@ -1,0 +1,5 @@
+node_modules/
+workspace/cases/
+workspace/test-results/
+workspace/.artifacts/
+workspace/node_modules/

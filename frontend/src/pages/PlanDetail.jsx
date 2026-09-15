@@ -1,10 +1,44 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { authFetch } from '../authApi';
+import { useUser } from '../context/UserContext';
+import { useToast } from '../context/ToastContext';
+import UserChip from '../components/UserChip';
+import EmptyState from '../components/ui/EmptyState';
+import StatusBadge from '../components/ui/StatusBadge';
+import SoftSelect from '../components/ui/SoftSelect';
+import BrowserIcon from '../components/ui/BrowserIcon';
+import SchedulePicker from '../components/plans/SchedulePicker';
+import WorkbenchLayout from '../components/layout/WorkbenchLayout';
+import {
+  caseSearchHaystack,
+  formatPriorityLabel,
+  getCaseRemark,
+  getCaseTags,
+  priorityClass,
+} from '../utils/caseDisplay';
+import { displayCreatorText, displayName, isSameCreator } from '../utils/userDisplay';
+import { formatRelativeTime, formatDateTime } from '../utils/formatTime';
+import { useTeamWrite } from '../hooks/useTeamWrite';
 
 const API = '/api';
 
-/** 展示用：遮盖 Webhook URL 中 key/token 等敏感查询参数，避免旁人窥屏 */
+const PLAN_TYPE_LABELS = {
+  ui_auto: 'UI自动化',
+  fastbot: 'Fastbot',
+};
+
+const DETAIL_TABS = [
+  { id: 'case', label: '用例管理' },
+  { id: 'execute', label: '执行配置' },
+  { id: 'notify', label: '通知 & 定时调度' },
+  { id: 'record', label: '执行记录' },
+];
+
+function planTypeLabel(type) {
+  return PLAN_TYPE_LABELS[type] || PLAN_TYPE_LABELS.ui_auto;
+}
+
 function maskWebhookUrlForDisplay(url) {
   const s = String(url || '').trim();
   if (!s) return '';
@@ -28,21 +62,31 @@ function maskWebhookUrlForDisplay(url) {
   }
 }
 
-/** 浏览器及其内核版本（联动：先选浏览器，再选该浏览器下的版本） */
+const BROWSER_OPTIONS = [
+  { id: 'chromium', label: 'Chromium', icon: 'chromium' },
+  { id: 'chrome', label: 'Chrome', icon: 'chrome' },
+  { id: 'msedge', label: 'Edge', icon: 'edge' },
+  { id: 'firefox', label: 'Firefox', icon: 'firefox' },
+  { id: 'webkit', label: 'WebKit', icon: 'webkit' },
+];
+
 const BROWSER_WITH_VERSIONS = [
   { id: 'chromium', label: 'Chromium', versions: [
-    { id: 'chromium', label: 'Chromium' },
-    { id: 'chrome', label: 'Chrome' },
-    { id: 'msedge', label: 'Edge' },
+    { id: 'chromium', label: 'Chromium', icon: 'chromium' },
+    { id: 'chrome', label: 'Chrome', icon: 'chrome' },
+    { id: 'msedge', label: 'Edge', icon: 'edge' },
   ]},
   { id: 'firefox', label: 'Firefox', versions: [
-    { id: 'firefox', label: 'Firefox' },
+    { id: 'firefox', label: 'Firefox', icon: 'firefox' },
   ]},
   { id: 'webkit', label: 'WebKit', versions: [
-    { id: 'webkit', label: 'WebKit' },
+    { id: 'webkit', label: 'WebKit', icon: 'webkit' },
   ]},
 ];
+
 function getVersionLabel(versionId) {
+  const flat = BROWSER_OPTIONS.find((b) => b.id === versionId);
+  if (flat) return flat.label;
   for (const b of BROWSER_WITH_VERSIONS) {
     const v = b.versions.find((x) => x.id === versionId);
     if (v) return `${b.label} · ${v.label}`;
@@ -50,33 +94,11 @@ function getVersionLabel(versionId) {
   return versionId;
 }
 
-/** 前端兜底：路径取文件名并去掉 .spec.ts 等 */
-function fallbackCaseName(pathStr) {
-  if (!pathStr) return '未命名用例';
-  const base = pathStr.split('/').pop() || pathStr;
-  return base.replace(/\.(spec|test)\.(ts|js|mjs)$/i, '') || base || '未命名用例';
-}
-
-/**
- * 统一计划接口返回结构，兼容两种后端格式：
- * - 本仓库：cases_json、case_metadata 对象(path->meta)、case_display_names、creator 字符串
- * - 其他：test_case_list、case_metadata 数组、case_display_name_list、creator 对象
- */
 function normalizePlanResponse(p) {
   if (!p || typeof p !== 'object') return p;
   let cases = p.cases;
   if (!Array.isArray(cases) && p.cases_json) {
-    try {
-      cases = JSON.parse(p.cases_json || '[]');
-    } catch (_) {
-      cases = [];
-    }
-  }
-  if (!Array.isArray(cases) && Array.isArray(p.test_case_list)) {
-    cases = p.test_case_list.map((t) => (t && (t.name ?? t.path)) || String(t));
-  }
-  if (!Array.isArray(cases) && Array.isArray(p.case_display_name_list)) {
-    cases = p.case_display_name_list.slice();
+    try { cases = JSON.parse(p.cases_json || '[]'); } catch (_) { cases = []; }
   }
   if (!Array.isArray(cases)) cases = [];
 
@@ -86,15 +108,7 @@ function normalizePlanResponse(p) {
     case_metadata.forEach((item, i) => {
       if (!item || typeof item !== 'object') return;
       const path = cases[i];
-      if (path != null) {
-        byPath[path] = {
-          name: item.name,
-          description: item.description,
-          priority: item.priority,
-          author: item.author,
-          createdAt: item.createdAt,
-        };
-      }
+      if (path != null) byPath[path] = { ...item };
     });
     case_metadata = byPath;
   } else if (case_metadata && typeof case_metadata !== 'object') {
@@ -121,37 +135,69 @@ function normalizePlanResponse(p) {
     case_metadata: case_metadata || null,
     case_display_names,
     creator: creator != null ? String(creator) : p.creator,
+    environment_summary: p.environment_summary || null,
   };
+}
+
+function fallbackCaseName(pathStr) {
+  if (!pathStr) return '用例';
+  const base = pathStr.split('/').pop() || pathStr;
+  return base.replace(/\.(spec|test)\.(ts|js|mjs)$/i, '') || base;
+}
+
+function CaseTagList({ tags }) {
+  if (!tags.length) return <span className="case-repo-cell-muted">—</span>;
+  return (
+    <div className="case-repo-tags">
+      {tags.slice(0, 4).map((tag) => (
+        <span key={tag} className="case-repo-tag">{tag}</span>
+      ))}
+      {tags.length > 4 && <span className="case-repo-tag case-repo-tag--more">+{tags.length - 4}</span>}
+    </div>
+  );
+}
+
+function CaseCreatorCell({ createdBy, currentUser }) {
+  if (!createdBy) return <span className="case-repo-cell-muted">—</span>;
+  const chipUser = isSameCreator(displayName(createdBy), currentUser) && currentUser
+    ? currentUser
+    : createdBy;
+  return <UserChip user={chipUser} size="sm" />;
 }
 
 export default function PlanDetail() {
   const { id } = useParams();
+  const user = useUser();
+  const canWrite = useTeamWrite();
+  const { showToast } = useToast();
   const [plan, setPlan] = useState(null);
+  const [activeTab, setActiveTab] = useState('case');
   const [running, setRunning] = useState(false);
-  const [toast, setToast] = useState(null);
-  const [caseFilterName, setCaseFilterName] = useState('');
-  const [caseFilterPath, setCaseFilterPath] = useState('');
-  const [caseFilterPriority, setCaseFilterPriority] = useState('');
-  const [casePage, setCasePage] = useState(1);
-  const CASE_PAGE_SIZE = 10;
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleCron, setScheduleCron] = useState('');
+  const [scheduleOnce, setScheduleOnce] = useState(false);
+  const [scheduleNextRun, setScheduleNextRun] = useState(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
-
   const [runBrowsers, setRunBrowsers] = useState([]);
   const [browsersSaving, setBrowsersSaving] = useState(false);
-  const [triggerMode, setTriggerMode] = useState('immediate'); // 'immediate' | 'scheduled'
   const [notifyWebhookUrl, setNotifyWebhookUrl] = useState('');
   const [notifyWebhookFocus, setNotifyWebhookFocus] = useState(false);
   const [notifyOnCreated, setNotifyOnCreated] = useState(true);
   const [notifyOnSuccess, setNotifyOnSuccess] = useState(true);
   const [notifyOnFailure, setNotifyOnFailure] = useState(true);
   const [notifySaving, setNotifySaving] = useState(false);
-  // 计划名编辑
+  const notifyWebhookDebounceRef = useRef(null);
   const [editingName, setEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
-  const [caseMetaRefreshing, setCaseMetaRefreshing] = useState(false);
   const [planLoadError, setPlanLoadError] = useState(null);
+  const [envList, setEnvList] = useState([]);
+  const [savedPlanEnvId, setSavedPlanEnvId] = useState('');
+  const [envBindingSaving, setEnvBindingSaving] = useState(false);
+  const [caseKeyword, setCaseKeyword] = useState('');
+  const [caseMetaRefreshing, setCaseMetaRefreshing] = useState(false);
+  const [runs, setRuns] = useState([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [envCheck, setEnvCheck] = useState({ ok: true, ready_to_execute: true, needs_plan_environment: false, portable_cases: [] });
 
   const refreshPlan = () => {
     setPlanLoadError(null);
@@ -162,38 +208,103 @@ export default function PlanDetail() {
         setPlan(normalized);
         setScheduleEnabled(!!normalized.schedule_enabled);
         setRunBrowsers(Array.isArray(normalized.run_browsers) ? [...normalized.run_browsers] : []);
-        setTriggerMode(normalized.schedule_enabled ? 'scheduled' : 'immediate');
         setScheduleCron(normalized.schedule_cron || '');
+        setScheduleOnce(!!normalized.schedule_once);
+        setScheduleNextRun(normalized.next_schedule_run || null);
         setNotifyWebhookUrl(normalized.notify_webhook_url || '');
         setNotifyOnCreated(normalized.notify_on_created == null || !!Number(normalized.notify_on_created));
         setNotifyOnSuccess(normalized.notify_on_success == null || !!Number(normalized.notify_on_success));
         setNotifyOnFailure(normalized.notify_on_failure == null || !!Number(normalized.notify_on_failure));
+        const pe = normalized.environment_id;
+        setSavedPlanEnvId(pe != null && pe !== '' ? String(pe) : '');
+        if (normalized.environment_summary) {
+          setEnvCheck(normalized.environment_summary);
+        }
       })
       .catch((err) => setPlanLoadError(err?.message || '加载失败'));
   };
 
-  useEffect(() => {
-    refreshPlan();
-  }, [id]);
+  useEffect(() => { refreshPlan(); }, [id]);
 
-  const refreshCaseMetadata = () => {
-    if (caseMetaRefreshing) return;
-    setCaseMetaRefreshing(true);
-    authFetch(API + '/plans/' + id + '/refresh-case-names', { method: 'POST' })
-      .then(() => refreshPlan())
-      .catch(() => setToast('刷新失败'))
-      .finally(() => setCaseMetaRefreshing(false));
+  useEffect(() => {
+    if (!id) return;
+    authFetch(API + '/plans/' + id + '/environment-check')
+      .then((r) => (r.ok ? r.json() : { ok: true }))
+      .then((data) => setEnvCheck(data && typeof data === 'object' ? data : { ok: true }))
+      .catch(() => setEnvCheck({ ok: true }));
+  }, [id, plan?.case_ids_json, plan?.cases_json, savedPlanEnvId]);
+
+  useEffect(
+    () => () => {
+      if (notifyWebhookDebounceRef.current) clearTimeout(notifyWebhookDebounceRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    authFetch(API + '/environments')
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setEnvList)
+      .catch(() => setEnvList([]));
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'record') return;
+    setRunsLoading(true);
+    authFetch(`${API}/runs?planId=${id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setRuns(Array.isArray(data) ? data : []))
+      .catch(() => setRuns([]))
+      .finally(() => setRunsLoading(false));
+  }, [activeTab, id]);
+
+  const persistPlanEnvironment = (idStr) => {
+    if (!idStr) return;
+    setEnvBindingSaving(true);
+    authFetch(API + '/plans/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ environment_id: Number(idStr) }),
+    })
+      .then((r) => (r.ok ? r.json() : r.json().then((d) => Promise.reject(new Error(d.error || r.statusText)))))
+      .then(() => {
+        setPlan((p) => (p ? { ...p, environment_id: Number(idStr) } : p));
+        showToast('执行环境已更新');
+        refreshPlan();
+      })
+      .catch((e) => showToast(e.message || '保存失败'))
+      .finally(() => setEnvBindingSaving(false));
   };
 
+  const planCases = plan ? (Array.isArray(plan.plan_cases) ? plan.plan_cases : []) : [];
+  const cases = planCases.length > 0
+    ? planCases.map((c) => c.path)
+    : (plan ? (Array.isArray(plan.cases) ? plan.cases : []) : []);
+  const hasPlanEnv = Boolean(savedPlanEnvId)
+    && envList.some((e) => String(e.id) === savedPlanEnvId);
+  const canExecute = cases.length > 0
+    && (envCheck.ready_to_execute ?? (!envCheck.needs_plan_environment || hasPlanEnv));
+
   const startRun = () => {
+    if (!canExecute) {
+      if (cases.length === 0) showToast('请先绑定用例', 2800);
+      else if (!(envCheck.ready_to_execute ?? true)) showToast(envCheck.error || '请先在执行配置中选择环境', 3200);
+      else if (envList.length === 0) showToast('请先创建执行环境', 2800);
+      else showToast('请先选择执行环境', 2800);
+      return;
+    }
     setRunning(true);
     authFetch(API + '/runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan_id: Number(id) }),
     })
-      .then((r) => r.json())
-      .then((data) => (window.location.href = '/runs/' + data.id))
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || r.statusText || '启动失败');
+        window.location.href = '/runs/' + data.id;
+      })
+      .catch((e) => showToast(e.message || '启动失败', 3200))
       .finally(() => setRunning(false));
   };
 
@@ -210,65 +321,71 @@ export default function PlanDetail() {
     })
       .then(() => {
         setPlan((p) => (p ? { ...p, run_browsers: next } : p));
-        setToast('执行浏览器已保存');
-        setTimeout(() => setToast(null), 2000);
+        showToast('执行浏览器已保存');
       })
       .finally(() => setBrowsersSaving(false));
   };
 
-  const removeRunBrowserVersion = (versionId) => {
-    const next = runBrowsers.filter((b) => b !== versionId);
-    setRunBrowsers(next);
-    setBrowsersSaving(true);
-    authFetch(API + '/plans/' + id, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ run_browsers: next.length ? next : null }),
-    })
-      .then(() => {
-        setPlan((p) => (p ? { ...p, run_browsers: next } : p));
-        setToast('已取消该组合');
-        setTimeout(() => setToast(null), 2000);
-      })
-      .finally(() => setBrowsersSaving(false));
-  };
-
-  const saveNotify = () => {
+  const persistNotifyPatch = (partial) => {
+    const body = {};
+    if (partial.notify_webhook_url !== undefined) body.notify_webhook_url = partial.notify_webhook_url;
+    if (partial.notify_on_created !== undefined) body.notify_on_created = partial.notify_on_created;
+    if (partial.notify_on_success !== undefined) body.notify_on_success = partial.notify_on_success;
+    if (partial.notify_on_failure !== undefined) body.notify_on_failure = partial.notify_on_failure;
+    if (!Object.keys(body).length) return;
     setNotifySaving(true);
     authFetch(API + '/plans/' + id + '/notify', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        notify_webhook_url: notifyWebhookUrl.trim() || null,
-        notify_on_created: notifyOnCreated,
-        notify_on_success: notifyOnSuccess,
-        notify_on_failure: notifyOnFailure,
-      }),
+      body: JSON.stringify(body),
     })
-      .then(() => {
-        setToast('通知设置已保存');
-        setTimeout(() => setToast(null), 2000);
-        refreshPlan();
-      })
-      .catch(() => setToast('通知设置保存失败'))
+      .then(() => refreshPlan())
+      .catch(() => showToast('通知设置保存失败'))
       .finally(() => setNotifySaving(false));
   };
 
-  const saveSchedule = (opts = {}) => {
-    const cron = scheduleCron.trim();
-    const enable = opts.enabled !== undefined ? opts.enabled : scheduleEnabled;
-    if (enable && !cron) return;
+  const scheduleNotifyWebhookPersist = (urlString) => {
+    if (notifyWebhookDebounceRef.current) clearTimeout(notifyWebhookDebounceRef.current);
+    notifyWebhookDebounceRef.current = setTimeout(() => {
+      notifyWebhookDebounceRef.current = null;
+      persistNotifyPatch({ notify_webhook_url: urlString.trim() || null });
+    }, 650);
+  };
+
+  const saveSchedule = ({ cron, once }) => {
+    if (!cron) return;
     setScheduleSaving(true);
-    setScheduleEnabled(!!enable);
+    setScheduleEnabled(true);
+    setScheduleCron(cron);
+    setScheduleOnce(!!once);
     authFetch(API + '/plans/' + id + '/schedule', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ schedule_enabled: !!enable, schedule_cron: cron || null }),
+      body: JSON.stringify({ schedule_enabled: true, schedule_cron: cron, schedule_once: !!once }),
     })
       .then(() => {
-        setToast('定时已保存');
-        setTimeout(() => setToast(null), 2000);
+        showToast(once ? '单次定时已保存' : '定时已保存');
+        refreshPlan();
       })
+      .catch(() => showToast('保存失败'))
+      .finally(() => setScheduleSaving(false));
+  };
+
+  const clearSchedule = () => {
+    setScheduleSaving(true);
+    setScheduleEnabled(false);
+    authFetch(API + '/plans/' + id + '/schedule', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schedule_enabled: false, schedule_cron: null, schedule_once: false }),
+    })
+      .then(() => {
+        setScheduleCron('');
+        setScheduleOnce(false);
+        setScheduleNextRun(null);
+        showToast('已关闭定时');
+      })
+      .catch(() => showToast('关闭失败'))
       .finally(() => setScheduleSaving(false));
   };
 
@@ -284,399 +401,462 @@ export default function PlanDetail() {
       .then(() => {
         setPlan((p) => (p ? { ...p, name } : p));
         setEditingName(false);
-        setToast('计划名已保存');
-        setTimeout(() => setToast(null), 2000);
+        showToast('计划名已保存');
       });
   };
 
-  const removeCase = (pathToRemove) => {
-    if (!window.confirm('确定从计划中移除该用例？')) return;
-    const caseList = Array.isArray(plan.cases) ? plan.cases : (plan.cases_json ? (() => { try { return JSON.parse(plan.cases_json); } catch (_) { return []; } })() : []);
-    const next = caseList.filter((p) => p !== pathToRemove);
-    if (next.length === cases.length) return;
-    authFetch(API + '/plans/' + id, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cases: next }),
-    }).then(() => refreshPlan());
+  const refreshCaseMetadata = () => {
+    if (caseMetaRefreshing) return;
+    setCaseMetaRefreshing(true);
+    authFetch(API + '/plans/' + id + '/refresh-case-names', { method: 'POST' })
+      .then(() => refreshPlan())
+      .catch(() => showToast('刷新失败'))
+      .finally(() => setCaseMetaRefreshing(false));
   };
 
+  const resolveCaseDisplayName = (path) => {
+    const meta = plan?.case_metadata?.[path];
+    return (meta && meta.name) || plan?.case_display_names?.[path] || fallbackCaseName(path);
+  };
+
+  const filteredPlanCases = useMemo(() => {
+    const rows = planCases.length > 0
+      ? planCases
+      : cases.map((path) => {
+          const meta = plan?.case_metadata?.[path];
+          return {
+            id: null,
+            path,
+            name: resolveCaseDisplayName(path),
+            priority: meta?.priority,
+            description: meta?.description,
+            tags: meta?.tags || [],
+          };
+        });
+    if (!caseKeyword.trim()) return rows;
+    const k = caseKeyword.trim().toLowerCase();
+    return rows.filter((row) => caseSearchHaystack(row).includes(k));
+  }, [planCases, cases, caseKeyword, plan]);
+
   if (!plan) {
-    return (
-      <div className="loading-state">
-        {planLoadError ? (
-          <>
-            <div className="empty-state__icon" aria-hidden>⚠</div>
-            <p className="empty-state__title">加载失败</p>
-            <p className="empty-state__hint">{planLoadError}，请检查网络或后端服务。</p>
-            <Link to="/" className="btn btn-secondary">返回测试计划</Link>
-          </>
-        ) : (
-          <>
-            <div className="loading-state__icon" aria-hidden style={{ letterSpacing: '0.25em' }}>···</div>
-            <p className="loading-state__text">加载计划详情</p>
-          </>
-        )}
-      </div>
+    return planLoadError ? (
+      <EmptyState
+        variant="error"
+        title="加载失败"
+        hint={`${planLoadError}，请检查网络或后端服务。`}
+        action={<Link to="/plans" className="btn btn-secondary">返回测试计划</Link>}
+      />
+    ) : (
+      <EmptyState variant="loading" title="加载计划详情" hint="正在获取计划信息" />
     );
   }
 
-  const cases = Array.isArray(plan.cases) ? plan.cases : (() => {
-    try {
-      return plan.cases_json ? JSON.parse(plan.cases_json) : [];
-    } catch (_) {
-      return [];
-    }
-  })();
-
-  const getCaseDisplayName = (c) => {
-    const meta = plan.case_metadata && plan.case_metadata[c];
-    return (meta && meta.name) || (plan.case_display_names && plan.case_display_names[c]) || fallbackCaseName(c);
-  };
-  const getCasePriority = (c) => {
-    const meta = plan.case_metadata && plan.case_metadata[c];
-    return (meta && meta.priority) || '—';
-  };
-  /** 优先级对应的 CSS 类名（用于颜色） */
-  const getCasePriorityClass = (c) => {
-    const p = getCasePriority(c);
-    if (!p || p === '—') return '';
-    const key = p.toUpperCase();
-    if (key === 'P0' || key === '高') return 'plan-detail-priority--p0';
-    if (key === 'P1' || key === '中') return 'plan-detail-priority--p1';
-    if (key === 'P2' || key === '低') return 'plan-detail-priority--p2';
-    if (key.startsWith('P')) return 'plan-detail-priority--p';
-    return 'plan-detail-priority--other';
-  };
-  const getCaseDescription = (c) => {
-    const meta = plan.case_metadata && plan.case_metadata[c];
-    return (meta && meta.description) || (getCaseDisplayName(c)) || '—';
-  };
-  const getCaseCreatedAt = (c) => {
-    const meta = plan.case_metadata && plan.case_metadata[c];
-    return (meta && meta.createdAt) || '—';
-  };
-  const getCaseAuthor = (c) => {
-    const meta = plan.case_metadata && plan.case_metadata[c];
-    return (meta && meta.author) != null && String(meta.author).trim() !== '' ? meta.author : '—';
-  };
-
-  const filteredCases = cases.filter((c) => {
-    const name = getCaseDisplayName(c);
-    const pathMatch = !caseFilterPath.trim() || c.toLowerCase().includes(caseFilterPath.trim().toLowerCase());
-    const nameMatch = !caseFilterName.trim() || name.toLowerCase().includes(caseFilterName.trim().toLowerCase());
-    const priority = getCasePriority(c);
-    const priorityMatch = !caseFilterPriority || priority === caseFilterPriority;
-    return pathMatch && nameMatch && priorityMatch;
-  });
-
-  const totalPages = Math.max(1, Math.ceil(filteredCases.length / CASE_PAGE_SIZE));
-  const pageIndex = Math.min(Math.max(1, casePage), totalPages);
-  const paginatedCases = filteredCases.slice((pageIndex - 1) * CASE_PAGE_SIZE, pageIndex * CASE_PAGE_SIZE);
-
   return (
-    <>
-      {toast && <div className="plan-toast" role="status">{toast}</div>}
-      <div className="breadcrumb">
-        <Link to="/">测试计划</Link>
-        <span className="sep">/</span>
-        <span>{plan.name}</span>
-      </div>
-      <div className="page-header">
-        <div className="page-header__title-wrap">
-          {editingName ? (
-            <>
-              <input
-                className="plan-detail-name-input"
-                value={editNameValue}
-                onChange={(e) => setEditNameValue(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && savePlanName()}
-                autoFocus
-              />
-              <button type="button" className="btn btn-primary" onClick={savePlanName}>保存</button>
-              <button type="button" className="btn btn-secondary" onClick={() => { setEditingName(false); setEditNameValue(plan.name); }}>取消</button>
-            </>
-          ) : (
-            <>
-              <h1 className="plan-detail-title">{plan.name}</h1>
-              <button type="button" className="plan-detail-pencil" onClick={() => { setEditNameValue(plan.name); setEditingName(true); }} title="修改名称" aria-label="修改名称">✎</button>
-            </>
-          )}
-        </div>
-        <div className="card-actions">
-          <Link to="/" className="btn btn-secondary">返回列表</Link>
-          <Link to={'/reports?planId=' + id} className="btn btn-secondary">历史记录</Link>
-        </div>
-      </div>
-
-      <div className="card card--compact plan-detail-meta-line">
-        {plan.created_at && (
-          <>
-            <span className="card-muted">创建时间：</span>
-            <span>{(() => {
-                const s = String(plan.created_at).trim();
-                const d = /^[\d-]+\s+[\d:]+$/.test(s) && !s.includes('Z') && !s.includes('+') ? new Date(s.replace(' ', 'T') + '+08:00') : new Date(s);
-                return Number.isNaN(d.getTime()) ? plan.created_at : d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-              })()}</span>
-            <span className="plan-detail-meta-line__sep" aria-hidden>·</span>
-          </>
-        )}
-        <span className="card-muted">仓库：</span>
-        <strong>{plan.repo_owner}/{plan.repo_name}</strong>
-        <span className="card-muted plan-detail-meta-line__gap">分支：</span>
-        <span>{plan.repo_branch || 'main'}</span>
-      </div>
-
-      <div className="card">
-        <div className="plan-detail-case-section-head">
-          <span className="section-title">用例（{cases.length} 个）</span>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={refreshCaseMetadata}
-            disabled={caseMetaRefreshing || cases.length === 0}
-          >
-            {caseMetaRefreshing ? '刷新中…' : '刷新用例元数据'}
-          </button>
-        </div>
-        <div className="plan-detail-case-filters">
-          <label className="plan-detail-case-filter">
-            <span className="plan-detail-case-filter__label">名称</span>
-            <input
-              type="text"
-              className="plan-detail-case-filter__input"
-              placeholder="按名称筛选"
-              value={caseFilterName}
-              onChange={(e) => { setCaseFilterName(e.target.value); setCasePage(1); }}
-            />
-          </label>
-          <label className="plan-detail-case-filter">
-            <span className="plan-detail-case-filter__label">路径</span>
-            <input
-              type="text"
-              className="plan-detail-case-filter__input"
-              placeholder="按路径筛选"
-              value={caseFilterPath}
-              onChange={(e) => { setCaseFilterPath(e.target.value); setCasePage(1); }}
-            />
-          </label>
-          <label className="plan-detail-case-filter">
-            <span className="plan-detail-case-filter__label">优先级</span>
-            <select
-              className="plan-detail-case-filter__input"
-              value={caseFilterPriority}
-              onChange={(e) => { setCaseFilterPriority(e.target.value); setCasePage(1); }}
-            >
-              <option value="">全部</option>
-              <option value="P0">P0</option>
-              <option value="P1">P1</option>
-              <option value="P2">P2</option>
-              <option value="高">高</option>
-              <option value="中">中</option>
-              <option value="低">低</option>
-            </select>
-          </label>
-        </div>
-        <div className="plan-detail-case-table-wrap plan-detail-case-table-wrap--scroll">
-          <table className="plan-detail-case-table">
-            <thead>
-              <tr>
-                <th>用例描述</th>
-                <th>用例优先级</th>
-                <th>用例路径</th>
-                <th>用例创建时间</th>
-                <th>用例创建人</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedCases.map((c) => (
-                <tr key={c}>
-                  <td className="plan-detail-case-desc-cell" title={getCaseDescription(c)}>{getCaseDescription(c)}</td>
-                  <td title={getCasePriority(c) === '—' ? '可点击上方「刷新用例元数据」从仓库拉取优先级' : undefined}>
-                    <span className={'plan-detail-priority ' + getCasePriorityClass(c)}>{getCasePriority(c)}</span>
-                  </td>
-                  <td className="plan-detail-case-path-cell" title={c}>{c}</td>
-                  <td>{getCaseCreatedAt(c)}</td>
-                  <td>{getCaseAuthor(c)}</td>
-                  <td>
-                    <button type="button" className="btn btn-secondary btn-danger btn-sm" onClick={() => removeCase(c)}>移除</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {filteredCases.length > 0 && (
-          <div className="plan-detail-case-pagination">
-            <span className="plan-detail-case-pagination__info">
-              共 {filteredCases.length} 条，第 {pageIndex}/{totalPages} 页
-            </span>
-            <div className="plan-detail-case-pagination__btns">
+    <WorkbenchLayout className={`plan-detail-page plan-detail-page--tabs${activeTab === 'case' && cases.length > 0 ? ' wb-page--fill' : ''}`}>
+      <div className="glass-card plan-detail-hero">
+        <div className="plan-detail-hero__inner">
+          <div className="plan-detail-hero__head">
+            <div className="plan-detail-hero__title-block">
+              {editingName ? (
+                <div className="plan-detail-head__edit">
+                  <input
+                    className="plan-detail-field plan-detail-name-input"
+                    value={editNameValue}
+                    onChange={(e) => setEditNameValue(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && savePlanName()}
+                    autoFocus
+                  />
+                  <button type="button" className="btn btn-primary btn-sm" onClick={savePlanName}>保存</button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setEditingName(false); setEditNameValue(plan.name); }}>取消</button>
+                </div>
+              ) : (
+                <div className="plan-detail-hero__title-row">
+                  <h1 className="plan-detail-hero__title">{plan.name}</h1>
+                  {canWrite && (
+                  <button
+                    type="button"
+                    className="plan-detail-head__edit-btn"
+                    onClick={() => { setEditNameValue(plan.name); setEditingName(true); }}
+                    aria-label="修改名称"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                      <path d="M11.5 2.5l2 2L5 13H3v-2l8.5-8.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                  )}
+                </div>
+              )}
+            </div>
+            {canWrite && (
+            <div className="plan-detail-hero__actions">
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
-                disabled={pageIndex <= 1}
-                onClick={() => setCasePage((p) => Math.max(1, p - 1))}
+                className="btn btn-primary plan-detail-hero__execute"
+                onClick={startRun}
+                disabled={running || !canExecute}
               >
-                上一页
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                disabled={pageIndex >= totalPages}
-                onClick={() => setCasePage((p) => Math.min(totalPages, p + 1))}
-              >
-                下一页
+                {running ? '执行中…' : '立即执行'}
               </button>
             </div>
+            )}
           </div>
-        )}
+          <div className="plan-detail-hero__meta">
+            <span className="plan-detail-tag">{planTypeLabel(plan.plan_type)}</span>
+            <span className="plan-detail-hero__meta-item">用例：<strong>{cases.length}</strong> 条</span>
+            <span className="plan-detail-hero__meta-item">执行：服务器 Playwright</span>
+            {plan.created_at && (
+              <span className="plan-detail-hero__meta-item" title={formatDateTime(plan.created_at)}>
+                创建时间：{formatDateTime(plan.created_at)}
+              </span>
+            )}
+            <span className="plan-detail-hero__creator plan-detail-hero__meta-item">
+              <span className="plan-detail-hero__creator-label">创建人</span>
+              {isSameCreator(plan.creator, user) ? (
+                <UserChip user={user} size="sm" />
+              ) : (
+                displayCreatorText(plan.creator, user)
+              )}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div className="card plan-detail-block">
-        <div className="section-title">执行方式</div>
-        <div className="plan-detail-exec-section">
-          <div className="plan-detail-exec-block plan-detail-exec-block--column">
-            <div className="plan-detail-exec-label">执行浏览器</div>
-            <p className="card-muted" style={{ margin: '0 0 0.5rem 0', fontSize: '0.8125rem' }}>先选择浏览器，再选择该浏览器下的内核版本。不选则使用仓库 playwright 配置的默认项目。</p>
-            {BROWSER_WITH_VERSIONS.map((browser) => (
-              <div key={browser.id} className="plan-detail-browser-group">
-                <div className="plan-detail-browser-group__name">{browser.label}</div>
-                <div className="plan-detail-browser-group__versions">
-                  {browser.versions.map((v) => (
-                    <label key={v.id} className="plan-detail-version-check">
-                      <input
-                        type="checkbox"
-                        checked={runBrowsers.includes(v.id)}
-                        onChange={() => toggleRunBrowserVersion(v.id)}
-                        disabled={browsersSaving}
-                      />
-                      <span>{v.label}</span>
-                    </label>
-                  ))}
+      <div className="glass-card plan-detail-tabs-wrap">
+        <nav className="plan-detail-tabs" role="tablist" aria-label="计划配置">
+          {DETAIL_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={'plan-detail-tabs__item' + (activeTab === tab.id ? ' plan-detail-tabs__item--active' : '')}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {activeTab === 'case' && (
+        <div className="glass-card plan-detail-panel plan-detail-case-panel">
+          {cases.length === 0 ? (
+            plan.plan_type === 'fastbot' ? (
+              <EmptyState title="Fastbot 用例" hint="即将上线" />
+            ) : (
+              <div className="plan-detail-case-empty">
+                <div className="plan-detail-case-empty__icon" aria-hidden>
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+                    <path d="M8 4h8l2 2v14H6V4h2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                    <path d="M9 9h6M9 13h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <p className="plan-detail-case-empty__title">当前计划未绑定任何自动化用例</p>
+                {canWrite && (
+                  <Link to={`/plans/${id}/cases`} className="btn btn-primary plan-detail-case-empty__cta">
+                    从用例库选择用例
+                  </Link>
+                )}
+              </div>
+            )
+          ) : (
+            <div className="case-repo-list-card">
+              <div className="case-repo-list-card__header">
+                <div className="case-repo-list-card__top">
+                  <div className="case-repo-list-card__title-block">
+                    <h2 className="case-repo-list-card__title">绑定自动化用例</h2>
+                    <span className="case-repo-list-card__count">
+                      共 <strong>{cases.length}</strong> 条
+                    </span>
+                  </div>
+                  <div className="case-repo-search">
+                    <span className="case-repo-search__icon" aria-hidden>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                        <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />
+                        <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                      </svg>
+                    </span>
+                    <input
+                      type="search"
+                      className="plan-detail-field case-repo-search__input"
+                      placeholder="搜索名称 / 标签 / 备注"
+                      value={caseKeyword}
+                      onChange={(e) => setCaseKeyword(e.target.value)}
+                    />
+                  </div>
+                  {canWrite && (
+                  <div className="case-repo-list-card__actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={refreshCaseMetadata}
+                      disabled={caseMetaRefreshing}
+                    >
+                      {caseMetaRefreshing ? '刷新中…' : '刷新元数据'}
+                    </button>
+                    <Link to={`/plans/${id}/cases`} className="btn btn-primary btn-sm">从用例库选择</Link>
+                  </div>
+                  )}
                 </div>
               </div>
-            ))}
+
+              <div className="case-repo-list-card__body">
+                {filteredPlanCases.length === 0 ? (
+                  <div className="case-repo-empty case-repo-empty--compact">
+                    <p className="case-repo-empty__title">未找到匹配的用例</p>
+                  </div>
+                ) : (
+                  <div className="ui-table-wrap case-repo-table-wrap case-repo-table-scroll">
+                    <table className="ui-table case-repo-table plan-detail-case-table">
+                      <thead>
+                        <tr>
+                          <th className="case-repo-table__name-h">名称</th>
+                          <th>优先级</th>
+                          <th>标签</th>
+                          <th>备注</th>
+                          <th>创建人</th>
+                          <th>创建时间</th>
+                          <th className="case-repo-table__actions">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredPlanCases.map((row) => {
+                          const tags = getCaseTags(row);
+                          return (
+                            <tr key={row.path}>
+                              <td className="case-repo-table__name">{row.name || resolveCaseDisplayName(row.path)}</td>
+                              <td>
+                                <span className={priorityClass(row.priority)}>
+                                  {formatPriorityLabel(row.priority)}
+                                </span>
+                              </td>
+                              <td><CaseTagList tags={tags} /></td>
+                              <td
+                                className="case-repo-table__remark"
+                                title={row.description?.trim() || ''}
+                              >
+                                {getCaseRemark(row)}
+                              </td>
+                              <td className="case-repo-table__creator">
+                                <CaseCreatorCell createdBy={row.created_by} currentUser={user} />
+                              </td>
+                              <td className="case-repo-table__time" title={row.created_at || ''}>
+                                {formatDateTime(row.created_at)}
+                              </td>
+                              <td className="case-repo-table__actions">
+                                {row.id ? (
+                                  <Link to={`/cases/${row.id}/edit`} className="btn btn-secondary btn-sm">{canWrite ? '编辑' : '查看'}</Link>
+                                ) : (
+                                  <span className="case-repo-cell-muted">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="case-repo-pagination plan-detail-case-pagination">
+                  <span className="case-repo-pagination__info">
+                    已绑定 <strong>{cases.length}</strong> 条
+                    {caseKeyword.trim() && filteredPlanCases.length !== cases.length
+                      ? `，筛选显示 ${filteredPlanCases.length} 条`
+                      : ''}
+                  </span>
+                  {canWrite && (
+                  <div className="case-repo-pagination__nav">
+                    <Link to={`/plans/${id}/cases`} className="btn btn-primary btn-sm">从用例库选择</Link>
+                  </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'execute' && (
+        <div className="plan-detail-tab-stack">
+          {plan?.environment_summary?.summary_text && (
+            <div className="glass-card plan-detail-panel plan-env-summary" role="status">
+              <p className="plan-env-summary__text">{plan.environment_summary.summary_text}</p>
+              {plan.environment_summary.total_cases > 0 && (
+                <div className="plan-env-summary__stats">
+                  <span>通用用例 {plan.environment_summary.portable_count}</span>
+                  <span>绑定包 {plan.environment_summary.bundle_own_env_count}</span>
+                </div>
+              )}
+            </div>
+          )}
+          {!(envCheck.ready_to_execute ?? true) && (
+            <div className="plan-new-create-inline-error" role="alert">
+              {envCheck.error || '执行前请为计划配置执行环境（添加用例无需先配置环境）。'}
+            </div>
+          )}
+          <div className="glass-card plan-detail-panel">
+            <h2 className="plan-detail-panel__title plan-detail-panel__title--solo">执行环境</h2>
+            <div className="plan-detail-exec-row">
+              <SoftSelect
+                value={savedPlanEnvId}
+                disabled={!canWrite || envBindingSaving || envList.length === 0}
+                placeholder={envList.length === 0 ? '暂无环境' : '请选择运行环境'}
+                aria-label="执行环境"
+                options={envList.map((e) => ({ value: String(e.id), label: e.name }))}
+                onChange={(v) => {
+                  setSavedPlanEnvId(v);
+                  persistPlanEnvironment(v);
+                }}
+                className="plan-detail-env-select"
+              />
+              <Link to="/environments" className="plan-config-section__link">管理环境</Link>
+              {envBindingSaving && <span className="plan-detail-inline-status">保存中</span>}
+            </div>
+          </div>
+
+          <div className="glass-card plan-detail-panel plan-detail-exec-note">
+            <p className="plan-detail-exec-note__text">
+              计划执行在<strong>服务器</strong>上运行 Playwright（无界面）。
+              单条用例调试请在用例编辑页使用「一键运行」（本机浏览器）。
+            </p>
+          </div>
+
+          <div className="glass-card plan-detail-panel">
+            <h2 className="plan-detail-panel__title plan-detail-panel__title--solo">执行浏览器</h2>
+            <div className="plan-detail-browser-tiles">
+              {BROWSER_OPTIONS.map((browser) => {
+                const checked = runBrowsers.includes(browser.id);
+                return (
+                  <button
+                    key={browser.id}
+                    type="button"
+                    className={`plan-detail-browser-tile${checked ? ' plan-detail-browser-tile--active' : ''}`}
+                    onClick={() => toggleRunBrowserVersion(browser.id)}
+                    disabled={!canWrite || browsersSaving}
+                    aria-pressed={checked}
+                  >
+                    <BrowserIcon id={browser.icon} size={36} className="plan-detail-browser-tile__icon" />
+                    <span className="plan-detail-browser-tile__label">{browser.label}</span>
+                    <span className="plan-detail-browser-tile__check" aria-hidden>
+                      {checked ? (
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                          <path d="M3.5 8.5l3 3 6-6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
             {runBrowsers.length > 0 && (
               <div className="plan-detail-selected-combos">
-                <span className="plan-detail-selected-combos__label">已选组合：</span>
                 {runBrowsers.map((versionId) => (
-                  <span key={versionId} className="plan-detail-combo-chip">
-                    {getVersionLabel(versionId)}
-                    <button type="button" className="plan-detail-combo-chip__remove" onClick={() => removeRunBrowserVersion(versionId)} disabled={browsersSaving} aria-label="取消选中">×</button>
-                  </span>
+                  <span key={versionId} className="plan-detail-combo-chip">{getVersionLabel(versionId)}</span>
                 ))}
               </div>
             )}
-            {browsersSaving && <span className="card-muted" style={{ fontSize: '0.8125rem', display: 'block', marginTop: '0.35rem' }}>保存中…</span>}
           </div>
         </div>
-      </div>
+      )}
 
-      <div className="card plan-detail-block">
-        <div className="section-title">消息通知</div>
-        <div className="plan-detail-notify-fields">
-          <label className="auth-form__field plan-detail-notify-field">
-            <span>群机器人 Webhook 地址</span>
+      {activeTab === 'notify' && (
+        <div className="plan-detail-tab-stack plan-detail-tab-stack--wide-fields">
+          <div className="glass-card plan-detail-panel">
+            <h2 className="plan-detail-panel__title plan-detail-panel__title--solo">Webhook 消息通知</h2>
             <input
               type="text"
-              className="plan-detail-notify-input"
+              className="plan-detail-field plan-detail-notify-input"
+              readOnly={!canWrite}
+              disabled={!canWrite}
               value={notifyWebhookFocus ? notifyWebhookUrl : maskWebhookUrlForDisplay(notifyWebhookUrl)}
-              onChange={(e) => setNotifyWebhookUrl(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setNotifyWebhookUrl(v);
+                scheduleNotifyWebhookPersist(v);
+              }}
               onFocus={() => setNotifyWebhookFocus(true)}
-              onBlur={() => setNotifyWebhookFocus(false)}
-              placeholder="https://365.kdocs.cn/woa/api/v1/webhook/send?key=…"
+              onBlur={(e) => {
+                setNotifyWebhookFocus(false);
+                if (notifyWebhookDebounceRef.current) {
+                  clearTimeout(notifyWebhookDebounceRef.current);
+                  notifyWebhookDebounceRef.current = null;
+                }
+                persistNotifyPatch({ notify_webhook_url: e.target.value.trim() || null });
+              }}
+              placeholder="https://企业通知机器人地址"
               autoComplete="off"
               spellCheck={false}
             />
-          </label>
-          <div className="plan-detail-notify-toggles">
-            <label className="plan-detail-notify-check">
-              <input type="checkbox" checked={notifyOnCreated} onChange={(e) => setNotifyOnCreated(e.target.checked)} />
-              <span>任务创建时通知</span>
-            </label>
-            <label className="plan-detail-notify-check">
-              <input type="checkbox" checked={notifyOnSuccess} onChange={(e) => setNotifyOnSuccess(e.target.checked)} />
-              <span>执行成功时通知</span>
-            </label>
-            <label className="plan-detail-notify-check">
-              <input type="checkbox" checked={notifyOnFailure} onChange={(e) => setNotifyOnFailure(e.target.checked)} />
-              <span>执行失败 / 取消时通知</span>
-            </label>
-          </div>
-          <button type="button" className="btn btn-primary plan-detail-notify-save" onClick={saveNotify} disabled={notifySaving}>
-            {notifySaving ? '保存中…' : '保存通知设置'}
-          </button>
-        </div>
-      </div>
-
-      <div className="card plan-detail-block">
-        <div className="section-title">触发方式</div>
-        <div className="plan-detail-exec-section">
-          <div className="plan-detail-exec-block plan-detail-exec-block--column">
-            <div className="plan-detail-trigger-cards">
-              <div
-                role="button"
-                tabIndex={0}
-                className={'plan-detail-trigger-card' + (triggerMode === 'immediate' ? ' plan-detail-trigger-card--active' : '')}
-                onClick={() => triggerMode !== 'immediate' && (setTriggerMode('immediate'), saveSchedule({ enabled: false }))}
-                onKeyDown={(e) => e.key === 'Enter' && triggerMode !== 'immediate' && (setTriggerMode('immediate'), saveSchedule({ enabled: false }))}
-              >
-                <div className="plan-detail-trigger-card__head">
-                  <span className="plan-detail-trigger-card__radio" aria-hidden>
-                    {triggerMode === 'immediate' ? '●' : '○'}
-                  </span>
-                  <span className="plan-detail-trigger-card__title">立即触发</span>
-                </div>
-                {triggerMode === 'immediate' && (
-                  <div className="plan-detail-trigger-card__body">
-                    <p className="plan-detail-trigger-card__hint">手动点击后立即执行一次计划</p>
-                    <button type="button" className="btn btn-primary" onClick={startRun} disabled={running}>
-                      {running ? '执行中...' : '立即执行'}
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div
-                role="button"
-                tabIndex={0}
-                className={'plan-detail-trigger-card' + (triggerMode === 'scheduled' ? ' plan-detail-trigger-card--active' : '')}
-                onClick={() => triggerMode !== 'scheduled' && setTriggerMode('scheduled')}
-                onKeyDown={(e) => e.key === 'Enter' && triggerMode !== 'scheduled' && setTriggerMode('scheduled')}
-              >
-                <div className="plan-detail-trigger-card__head">
-                  <span className="plan-detail-trigger-card__radio" aria-hidden>
-                    {triggerMode === 'scheduled' ? '●' : '○'}
-                  </span>
-                  <span className="plan-detail-trigger-card__title">定时触发</span>
-                </div>
-                {triggerMode === 'scheduled' && (
-                  <div className="plan-detail-trigger-card__body">
-                    <div className="plan-detail-schedule-row">
-                      <input
-                        value={scheduleCron}
-                        onChange={(e) => setScheduleCron(e.target.value)}
-                        placeholder="0 9 * * *（分 时 日 月 周）"
-                        className="plan-detail-cron-input"
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                      <button type="button" className="btn btn-secondary plan-detail-cron-save" onClick={(e) => { e.stopPropagation(); saveSchedule({ enabled: true }); }} disabled={scheduleSaving || !scheduleCron.trim()}>
-                        {scheduleSaving ? '保存中...' : '保存'}
-                      </button>
-                    </div>
-                    <p className="plan-detail-cron-link-hint">
-                      不确定格式？可前往
-                      <a href="https://crontab.guru/" target="_blank" rel="noopener noreferrer" className="plan-detail-cron-link" onClick={(e) => e.stopPropagation()}>cron 计算器</a>
-                      调试表达式。
-                    </p>
-                  </div>
-                )}
-              </div>
+            <div className="plan-detail-notify-toggles">
+              <label className="plan-detail-notify-check">
+                <input type="checkbox" disabled={!canWrite} checked={notifyOnCreated} onChange={(e) => { const v = e.target.checked; setNotifyOnCreated(v); persistNotifyPatch({ notify_on_created: v }); }} />
+                <span>任务创建完成通知</span>
+              </label>
+              <label className="plan-detail-notify-check">
+                <input type="checkbox" disabled={!canWrite} checked={notifyOnSuccess} onChange={(e) => { const v = e.target.checked; setNotifyOnSuccess(v); persistNotifyPatch({ notify_on_success: v }); }} />
+                <span>执行成功通知</span>
+              </label>
+              <label className="plan-detail-notify-check">
+                <input type="checkbox" disabled={!canWrite} checked={notifyOnFailure} onChange={(e) => { const v = e.target.checked; setNotifyOnFailure(v); persistNotifyPatch({ notify_on_failure: v }); }} />
+                <span>执行失败 / 取消通知</span>
+              </label>
             </div>
+            {notifySaving && <span className="plan-detail-inline-status">保存中</span>}
+          </div>
+
+          <div className="glass-card plan-detail-panel">
+            <h2 className="plan-detail-panel__title plan-detail-panel__title--solo">定时调度任务</h2>
+            <SchedulePicker
+              readOnly={!canWrite}
+              enabled={scheduleEnabled}
+              cron={scheduleCron}
+              once={scheduleOnce}
+              nextRun={scheduleNextRun}
+              saving={scheduleSaving}
+              onSave={saveSchedule}
+              onClear={clearSchedule}
+            />
           </div>
         </div>
-      </div>
-    </>
+      )}
+
+      {activeTab === 'record' && (
+        <div className="glass-card plan-detail-panel">
+          <div className="plan-detail-panel__head">
+            <h2 className="plan-detail-panel__title">全部执行历史</h2>
+            <Link to={'/reports?planId=' + id} className="plan-config-section__link">查看完整列表</Link>
+          </div>
+          {runsLoading ? (
+            <EmptyState variant="loading" title="加载执行记录" />
+          ) : runs.length === 0 ? (
+            <EmptyState title="暂无执行记录" hint="执行计划后将在此展示" />
+          ) : (
+            <div className="ui-table-wrap">
+              <table className="ui-table">
+                <thead>
+                  <tr>
+                    <th>状态</th>
+                    <th>开始时间</th>
+                    <th>用例</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.slice(0, 20).map((run) => (
+                    <tr key={run.id}>
+                      <td><StatusBadge status={run.status} /></td>
+                      <td>{formatRelativeTime(run.started_at || run.created_at)}</td>
+                      <td>{run.passed_count ?? 0}/{run.total_cases ?? run.cases_count ?? '—'}</td>
+                      <td><Link to={'/runs/' + run.id} className="plan-config-section__link">报告</Link></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </WorkbenchLayout>
   );
 }

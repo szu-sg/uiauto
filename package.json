@@ -4,7 +4,9 @@
   "private": true,
   "description": "Playwright test plan & report MVP",
   "scripts": {
-    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ../local-runner && npm install",
+    "local-runner:install": "cd local-runner && npm.cmd install",
+    "local-runner": "cd local-runner && npm.cmd start",
     "backend": "cd backend && npm run dev",
     "frontend": "cd frontend && npm run dev",
     "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
