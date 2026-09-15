@@ -7,6 +7,7 @@ import { useConfirm } from '../context/ConfirmContext';
 import { useCreatePlan } from '../context/CreatePlanContext';
 import UserChip from '../components/UserChip';
 import EmptyState from '../components/ui/EmptyState';
+import StatusBadge from '../components/ui/StatusBadge';
 import { TableSkeleton } from '../components/ui/Skeleton';
 import PlanTableActions from '../components/home/PlanTableActions';
 import WorkbenchLayout, {
@@ -258,11 +259,12 @@ export default function PlanList() {
     <WorkbenchLayout className="page-workbench page-workbench--plans wb-page--fill">
       {loading ? (
         <WorkbenchPanel className="wb-panel--loading">
-          <TableSkeleton rows={6} cols={8} />
+          <TableSkeleton rows={6} cols={6} />
         </WorkbenchPanel>
       ) : safePlans.length === 0 ? (
         <EmptyState
           title="还没有测试计划"
+          hint="创建你的第一个测试计划，开始自动化测试"
           action={canWrite ? <button type="button" className="btn btn-primary" onClick={openCreatePlan}>新建测试计划</button> : null}
         />
       ) : filteredPlans.length === 0 ? (
@@ -285,7 +287,7 @@ export default function PlanList() {
                   id="plan-list-filter"
                   type="search"
                   className="input-soft"
-                  placeholder="搜索名称、创建人、环境"
+                  placeholder="搜索计划名称、创建人"
                   value={keyword}
                   onChange={(e) => setKeyword(e.target.value)}
                   aria-label="搜索计划"
@@ -316,7 +318,7 @@ export default function PlanList() {
               )}
               meta={(
                 <>
-                  共 <span className="text-accent">{totalCount}</span> 条
+                  共 <span className="text-accent">{totalCount}</span> 个计划
                 </>
               )}
             />
@@ -362,7 +364,7 @@ export default function PlanList() {
                       onClick={() => toggleSort('name')}
                       aria-label="按名称排序"
                     >
-                      名称
+                      计划
                       <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
                     </button>
                   </th>
@@ -373,12 +375,11 @@ export default function PlanList() {
                       onClick={() => toggleSort('cases')}
                       aria-label="按用例数排序"
                     >
-                      用例数
+                      用例
                       <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'cases' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
                     </button>
                   </th>
-                  <th>执行环境</th>
-                  <th>执行浏览器</th>
+                  <th className="plan-table__env-h">环境 / 浏览器</th>
                   <th>
                     <button
                       type="button"
@@ -386,7 +387,7 @@ export default function PlanList() {
                       onClick={() => toggleSort('schedule')}
                       aria-label="按定时排序"
                     >
-                      定时时间
+                      定时
                       <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'schedule' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
                     </button>
                   </th>
@@ -403,11 +404,12 @@ export default function PlanList() {
                   const envLabel = formatPlanEnvironment(p);
                   const browserLabel = formatPlanBrowsers(p);
                   const scheduleLabel = formatPlanSchedule(p);
+                  const isRunning = runningPlanId === p.id;
 
                   return (
                     <tr
                       key={p.id ?? `plan-${idx}`}
-                      className={`wb-table__row${planEnabled ? '' : ' plan-table__row--disabled'}${runningPlanId === p.id ? ' plan-table__row--running' : ''}`}
+                      className={`wb-table__row plan-row${planEnabled ? '' : ' plan-row--disabled'}${isRunning ? ' plan-row--running' : ''}`}
                       tabIndex={0}
                       title={`创建于 ${formatDateTime(p.created_at)}`}
                       onClick={() => {
@@ -442,16 +444,34 @@ export default function PlanList() {
                           />
                         </td>
                       )}
-                      <td className="plan-table__name" title={p.name || ''}>
-                        {runningPlanId === p.id && (
-                          <span className="plan-running-dot" title="该计划正在执行中" aria-label="执行中" />
-                        )}
-                        {p.name}
+                      <td className="plan-table__name-cell" title={p.name || ''}>
+                        <div className="plan-name-group">
+                          <span className="plan-name-group__name">
+                            {isRunning && <span className="plan-running-dot" title="执行中" />}
+                            {p.name}
+                          </span>
+                          <span className="plan-name-group__meta" title={`${envLabel} · ${browserLabel}`}>
+                            {envLabel}{envLabel && browserLabel ? ' · ' : ''}{browserLabel}
+                          </span>
+                        </div>
                       </td>
-                      <td className="plan-table__count">{caseCount}</td>
-                      <td className="plan-table__env" title={envLabel}>{envLabel}</td>
-                      <td className="plan-table__browser" title={browserLabel}>{browserLabel}</td>
-                      <td className="plan-table__schedule" title={scheduleLabel}>{scheduleLabel}</td>
+                      <td className="plan-table__count">
+                        <span className="plan-count-badge">{caseCount}</span>
+                      </td>
+                      <td className="plan-table__env-col">
+                        {envLabel ? (
+                          <span className="plan-env-tag" title={envLabel}>{envLabel}</span>
+                        ) : (
+                          <span className="text-faint">—</span>
+                        )}
+                      </td>
+                      <td className="plan-table__schedule-col">
+                        {scheduleLabel && scheduleLabel !== '—' ? (
+                          <span className="plan-schedule-badge">{scheduleLabel}</span>
+                        ) : (
+                          <span className="text-faint">—</span>
+                        )}
+                      </td>
                       <td className="plan-table__creator">
                         {creatorIsMe ? (
                           <UserChip user={user} size="sm" />
