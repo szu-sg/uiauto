@@ -6,9 +6,9 @@ export default function WorkbenchLayout({ children, className = '' }) {
   );
 }
 
-export function WorkbenchHeader({ title, description, meta, actions }) {
+export function WorkbenchHeader({ title, description, meta, actions, compact = false }) {
   return (
-    <header className="wb-header">
+    <header className={`wb-header${compact ? ' wb-header--compact' : ''}`}>
       <div className="wb-header__text">
         <h1 className="wb-header__title">{title}</h1>
         {description && <p className="wb-header__desc">{description}</p>}

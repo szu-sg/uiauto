@@ -83,6 +83,7 @@ export default function RunCaseReport() {
   return (
     <WorkbenchLayout className="run-case-page">
       <WorkbenchHeader
+        compact
         title={(
           <span className="run-case-header__title-row">
             <span>{displayName}</span>
@@ -90,7 +91,9 @@ export default function RunCaseReport() {
               status={isPassed ? 'passed' : isFailed ? 'failed' : data.status === 'running' ? 'running' : 'pending'}
               label={statusLabel}
             />
-            <span className={`run-case-source run-case-source--${source.kind}`}>{source.label}</span>
+            <span className="run-case-source run-case-source--${source.kind}" style={{'--case-source-kind': source.kind}}>{source.label}</span>
+            <span className="run-case-header__stat">{getBrowserLabel(data.browser)}</span>
+            <span className="run-case-header__stat">{formatDuration(data.duration_ms)}</span>
           </span>
         )}
         description={showPath ? (
@@ -118,7 +121,7 @@ export default function RunCaseReport() {
           </>
         )}
         actions={(
-          <Link to={'/runs/' + runId} className="btn btn-secondary">返回报告</Link>
+          <Link to={'/runs/' + runId} className="btn btn-secondary btn-sm">返回报告</Link>
         )}
       />
 
@@ -136,14 +139,6 @@ export default function RunCaseReport() {
         <div className="run-case-meta-card">
           <span className="run-case-meta-card__label">耗时</span>
           <span className="run-case-meta-card__value">{formatDuration(data.duration_ms)}</span>
-        </div>
-        <div className="run-case-meta-card">
-          <span className="run-case-meta-card__label">浏览器</span>
-          <span className="run-case-meta-card__value">{getBrowserLabel(data.browser)}</span>
-        </div>
-        <div className="run-case-meta-card">
-          <span className="run-case-meta-card__label">来源</span>
-          <span className="run-case-meta-card__value">{source.shortLabel}</span>
         </div>
         <div className="run-case-meta-card">
           <span className="run-case-meta-card__label">复用范围</span>

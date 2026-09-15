@@ -409,6 +409,28 @@
   padding-top: 0.125rem;
 }
 
+/* Compact header variant */
+.wb-header--compact {
+  padding-bottom: 0;
+  gap: 0.75rem;
+}
+
+.wb-header--compact .wb-header__title {
+  font-size: var(--text-lg);
+  line-height: 1.35;
+}
+
+.wb-header--compact .wb-header__desc {
+  margin-top: 0.1875rem;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.wb-header--compact .wb-header__meta {
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+}
+
 /* Stat bar — neutral cards with colored left accent */
 .wb-stats {
   display: flex;

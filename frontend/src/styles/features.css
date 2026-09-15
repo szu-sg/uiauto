@@ -4611,8 +4611,21 @@
   gap: 0.5rem 0.75rem;
 }
 
-.run-case-page .wb-header__title {
-  font-size: var(--text-xl);
+.run-case-header__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--c-text-muted);
+  background: var(--c-surface-2, #f4f5f7);
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
+}
+
+.run-case-page .wb-header--compact .wb-header__title {
+  font-size: var(--text-lg);
 }
 
 .run-case-header__path {
