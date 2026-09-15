@@ -40,7 +40,10 @@ export default function PlanList() {
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [sortKey, setSortKey] = useState('created_at');
+  const [sortDir, setSortDir] = useState('desc');
   const [executingId, setExecutingId] = useState(null);
+  const [runningPlanId, setRunningPlanId] = useState(null);
   const [bulkSelectMode, setBulkSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
@@ -52,6 +55,24 @@ export default function PlanList() {
       .then((r) => r.json())
       .then(setPlans)
       .finally(() => setLoading(false));
+  }, []);
+
+  // 轮询当前执行中的任务，用于在列表中高亮对应计划行
+  useEffect(() => {
+    let alive = true;
+    const fetchStatus = () => {
+      authFetch(API + '/runs/status')
+        .then((r) => (r.ok ? r.json() : { running: false }))
+        .then((s) => {
+          if (!alive) return;
+          if (s?.running) setRunningPlanId(s.planId ?? null);
+          else setRunningPlanId(null);
+        })
+        .catch(() => { if (alive) setRunningPlanId(null); });
+    };
+    fetchStatus();
+    const t = setInterval(fetchStatus, 8000);
+    return () => { alive = false; clearInterval(t); };
   }, []);
 
   const safePlans = Array.isArray(plans) ? plans : [];
@@ -68,14 +89,50 @@ export default function PlanList() {
     });
   }, [safePlans, keyword]);
 
-  const totalCount = filteredPlans.length;
+  // 表头排序：名称 / 用例数 / 创建时间 / 定时，切换方向时自动取反
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir(key === 'name' || key === 'schedule' ? 'asc' : 'desc'); }
+  };
+
+  const sortedPlans = useMemo(() => {
+    const arr = [...filteredPlans];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    arr.sort((a, b) => {
+      let va; let vb;
+      switch (sortKey) {
+        case 'name':
+          va = String(a.name || '').toLowerCase();
+          vb = String(b.name || '').toLowerCase();
+          return va.localeCompare(vb, 'zh-CN') * dir;
+        case 'cases': {
+          va = parseCaseCount(a); vb = parseCaseCount(b);
+          break;
+        }
+        case 'schedule': {
+          const av = a.schedule_cron || (a.schedule_once ? '~once' : '');
+          const bv = b.schedule_cron || (b.schedule_once ? '~once' : '');
+          va = String(av); vb = String(bv);
+          return va.localeCompare(vb) * dir;
+        }
+        default: {
+          va = a.created_at || ''; vb = b.created_at || '';
+          return String(va).localeCompare(String(vb)) * dir;
+        }
+      }
+      return (va - vb) * dir;
+    });
+    return arr;
+  }, [filteredPlans, sortKey, sortDir]);
+
+  const totalCount = sortedPlans.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const currentPage = Math.min(Math.max(1, page), totalPages);
 
   const pagePlans = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    return filteredPlans.slice(start, start + pageSize);
-  }, [filteredPlans, currentPage, pageSize]);
+    return sortedPlans.slice(start, start + pageSize);
+  }, [sortedPlans, currentPage, pageSize]);
 
   const pageIds = useMemo(() => pagePlans.map((p) => p.id).filter(Boolean), [pagePlans]);
   const pageAllSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
@@ -298,13 +355,42 @@ export default function PlanList() {
                       />
                     </th>
                   )}
-                  <th className="plan-table__name-h">名称</th>
-                  <th>用例数</th>
+                  <th className="plan-table__name-h">
+                    <button
+                      type="button"
+                      className={`plan-sort-btn${sortKey === 'name' ? ' plan-sort-btn--active' : ''}`}
+                      onClick={() => toggleSort('name')}
+                      aria-label="按名称排序"
+                    >
+                      名称
+                      <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`plan-sort-btn${sortKey === 'cases' ? ' plan-sort-btn--active' : ''}`}
+                      onClick={() => toggleSort('cases')}
+                      aria-label="按用例数排序"
+                    >
+                      用例数
+                      <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'cases' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
+                    </button>
+                  </th>
                   <th>执行环境</th>
                   <th>执行浏览器</th>
-                  <th>定时时间</th>
+                  <th>
+                    <button
+                      type="button"
+                      className={`plan-sort-btn${sortKey === 'schedule' ? ' plan-sort-btn--active' : ''}`}
+                      onClick={() => toggleSort('schedule')}
+                      aria-label="按定时排序"
+                    >
+                      定时时间
+                      <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'schedule' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
+                    </button>
+                  </th>
                   <th>创建人</th>
-                  <th>创建时间</th>
                   <th className="plan-table__actions-h">操作</th>
                 </tr>
               </thead>
@@ -321,8 +407,9 @@ export default function PlanList() {
                   return (
                     <tr
                       key={p.id ?? `plan-${idx}`}
-                      className={`wb-table__row${planEnabled ? '' : ' plan-table__row--disabled'}`}
+                      className={`wb-table__row${planEnabled ? '' : ' plan-table__row--disabled'}${runningPlanId === p.id ? ' plan-table__row--running' : ''}`}
                       tabIndex={0}
+                      title={`创建于 ${formatDateTime(p.created_at)}`}
                       onClick={() => {
                         if (bulkSelectMode) {
                           const next = new Set(selected);
@@ -356,6 +443,9 @@ export default function PlanList() {
                         </td>
                       )}
                       <td className="plan-table__name" title={p.name || ''}>
+                        {runningPlanId === p.id && (
+                          <span className="plan-running-dot" title="该计划正在执行中" aria-label="执行中" />
+                        )}
                         {p.name}
                       </td>
                       <td className="plan-table__count">{caseCount}</td>
@@ -368,9 +458,6 @@ export default function PlanList() {
                         ) : (
                           <UserChip label={displayCreatorText(p.creator, user)} size="sm" />
                         )}
-                      </td>
-                      <td className="plan-table__time" title={formatDateTime(p.created_at)}>
-                        {formatRelativeTime(p.created_at)}
                       </td>
                       <td className="plan-table__actions">
                         <PlanTableActions

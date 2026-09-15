@@ -935,6 +935,66 @@
   color: var(--c-text-muted);
 }
 
+/* 表头排序按钮 */
+.page-workbench--plans .plan-sort-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: var(--font-medium);
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: color 0.15s;
+}
+
+.page-workbench--plans .plan-sort-btn:hover,
+.page-workbench--plans .plan-sort-btn--active {
+  color: var(--c-accent);
+}
+
+.page-workbench--plans .plan-sort-btn__arrow {
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+
+/* 执行中的计划行高亮 */
+.page-workbench--plans .plan-table__row--running {
+  background: var(--c-accent-soft);
+}
+
+.page-workbench--plans .plan-table__row--running:hover {
+  background: rgba(99, 102, 241, 0.16);
+}
+
+.plan-running-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  margin-right: 0.5rem;
+  vertical-align: 1px;
+  animation: plan-running-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes plan-running-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(99, 102, 241, 0); }
+}
+
+/* 精简后的表头宽度约束 */
+.page-workbench--plans .plan-table__actions-h {
+  width: 168px;
+  text-align: right;
+}
+
+.page-workbench--plans .plan-table__time {
+  display: none;
+}
+
 .page-workbench--plans .wb-pagination {
   flex-shrink: 0;
   padding: 0.55rem 1rem !important;

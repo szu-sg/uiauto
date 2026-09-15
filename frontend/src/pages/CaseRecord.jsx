@@ -465,6 +465,34 @@ export default function CaseRecord() {
     <WorkbenchLayout className="recorder-page wb-page--fill">
       <div className="recorder-shell">
         <LocalRunnerBanner compact />
+        {(!loading && !status.extConnected) && (
+          <div className="recorder-guide" role="alert">
+            <div className="recorder-guide__icon" aria-hidden>🧩</div>
+            <div className="recorder-guide__body">
+              <p className="recorder-guide__title">
+                {sessionError || wsError ? '录制通道不可用' : '浏览器扩展未连接'}
+              </p>
+              <p className="recorder-guide__text">
+                {sessionError || wsError
+                  ? (sessionError || wsError)
+                  : '要开始录制用例，需要先安装浏览器扩展并在本页保持打开。'}
+              </p>
+              <ol className="recorder-guide__steps">
+                {!(sessionError || wsError) && (
+                  <>
+                    <li>点击「安装插件」下载扩展（Chrome 右上角 → 扩展程序 → 开启开发者模式 → 加载已解压的扩展程序）</li>
+                    <li>选择 <code>extension/</code> 目录并加载</li>
+                    <li>保持本页打开，扩展会自动建立连接</li>
+                  </>
+                )}
+              </ol>
+            </div>
+            <div className="recorder-guide__actions">
+              <Link to="/extension" className="btn btn-secondary btn-sm">安装插件</Link>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={reconnect}>重新连接</button>
+            </div>
+          </div>
+        )}
         <header className="recorder-toolbar">
           <div className="recorder-toolbar__primary">
             <button
@@ -500,7 +528,7 @@ export default function CaseRecord() {
             </button>
           </div>
 
-          <div className={`recorder-status recorder-status--${connectionState.tone}`}>
+          <div className={`recorder-status recorder-status--${connectionState.tone}`} aria-live="polite">
             <span className="recorder-status__dot" aria-hidden />
             <span className="recorder-status__text">{connectionState.text}</span>
             {session?.sessionId && !sessionError && (

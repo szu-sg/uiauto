@@ -9,6 +9,7 @@ import UserChip from '../components/UserChip';
 import StatusBadge from '../components/ui/StatusBadge';
 import CopyButton from '../components/ui/CopyButton';
 import EmptyState from '../components/ui/EmptyState';
+import PassRateRing from '../components/ui/PassRateRing';
 import WorkbenchLayout, {
   WorkbenchHeader,
   WorkbenchPanel,
@@ -85,8 +86,8 @@ export default function RunReport() {
     };
     fetchRun();
     if (!polling) return;
-    // 每 1 秒刷新，已完成的用例会实时显示成功/失败，无需等全部跑完
-    const t = setInterval(fetchRun, 1000);
+    // 执行中每 3 秒刷新，已完成的用例会实时显示成功/失败；结束后停止轮询
+    const t = setInterval(fetchRun, 3000);
     return () => clearInterval(t);
   }, [id, polling]);
 
@@ -117,7 +118,6 @@ export default function RunReport() {
     : null;
   const failedCount = cases.filter((c) => c.status === 'failed').length;
   const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
-  const passRateClass = passRate >= 80 ? 'run-report-pass--high' : passRate > 0 ? 'run-report-pass--mid' : 'run-report-pass--zero';
   const totalMs = cases.reduce((s, c) => s + (c.duration_ms || 0), 0);
   const runDurationMs = run.started_at && run.finished_at ? parseBeijingTime(run.finished_at) - parseBeijingTime(run.started_at) : null;
 
@@ -220,9 +220,13 @@ export default function RunReport() {
 
       <section className="run-report-summary" aria-label="执行概览">
         <div className="run-report-summary__main">
-          <div className={`run-report-summary__pass ${passRateClass}`}>
-            <span className="run-report-summary__pass-value">{passed}/{total}</span>
-            <span className="run-report-summary__pass-label">用例通过 · {passRate}%</span>
+          <div className="run-report-summary__ring">
+            <PassRateRing rate={passRate} size={92} stroke={10} />
+            <div className="run-report-summary__ring-meta">
+              <span className="run-report-summary__pass-value">{passed}/{total}</span>
+              <span className="run-report-summary__pass-label">用例通过</span>
+              {run.status === 'running' && <span className="run-report-summary__pass-live">执行中实时更新</span>}
+            </div>
           </div>
           <div className="run-report-summary__bar" aria-hidden>
             <span className="run-report-summary__bar-pass" style={{ width: `${passRate}%` }} />

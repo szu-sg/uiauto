@@ -107,6 +107,7 @@ router.get('/status', (req, res) => {
   res.json({
     running: true,
     runId: row?.id,
+    planId: plan?.id ?? null,
     planName: plan.name ?? null,
     phase: row?.progress_phase ?? null,
     phaseLabel,
