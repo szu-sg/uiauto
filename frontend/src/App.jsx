@@ -60,63 +60,11 @@ import TeamSwitcher from './components/TeamSwitcher';
 
 import { UserProvider } from './context/UserContext';
 
-import { getToken, clearToken, authFetch, AUTH_DISABLED } from './authApi';
+import { getToken, clearToken, AUTH_DISABLED } from './authApi';
 
 
 
 const API = '/api';
-
-
-
-function GlobalExecBar() {
-
-  const [status, setStatus] = useState(null);
-
-  useEffect(() => {
-
-    if (!getToken() && !AUTH_DISABLED) return;
-
-    const fetchStatus = () => {
-
-      authFetch(API + '/runs/status')
-
-        .then((r) => (r.ok ? r.json() : { running: false }))
-
-        .then(setStatus)
-
-        .catch(() => setStatus({ running: false }));
-
-    };
-
-    fetchStatus();
-
-    const t = setInterval(fetchStatus, 3000);
-
-    return () => clearInterval(t);
-
-  }, []);
-
-  if (!status?.running) return null;
-
-  return (
-
-    <div className="global-exec-bar" role="status">
-
-      <span className="global-exec-bar__dot" aria-hidden />
-
-      <span>
-
-        执行中：{status.planName || '计划'} — {status.phaseLabel || status.phase || '…'}
-
-      </span>
-
-      <Link to={'/runs/' + status.runId} className="global-exec-bar__link">查看报告</Link>
-
-    </div>
-
-  );
-
-}
 
 function AppBreadcrumb() {
   const { pathname, search } = useLocation();
@@ -572,8 +520,6 @@ export default function App() {
 
         <div className="app-main-wrap">
           <AppTopbar user={user} onLogout={onLogout} onTeamChange={setUser} />
-
-          <GlobalExecBar />
 
           <main className="app-main">
             <div className="app-main__content">

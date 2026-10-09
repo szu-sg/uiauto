@@ -233,18 +233,23 @@ async function injectRecordedStorageState(repoDir, storageState) {
 }
 
 /**
- * 纯 HTTP：若合并后的环境变量中有 UIAUTO_COOKIE_LOGIN_URL，且 E2E_USERNAME / E2E_PASSWORD 非空，
- * 则 POST 该 URL，body 为 JSON { username, password }。期望响应为：
- * { "cookies": [ { "name","value","domain","path", ... } ] }（与 Playwright storageState.cookies 字段兼容），
- * 或根为 cookies 数组。可选 UIAUTO_COOKIE_LOGIN_HEADERS（JSON 对象字符串）附加请求头。
- * 成功则写入仓库根 auth.json；若本步成功会覆盖此前 WPS 等方式生成的 auth.json。
+ * POST UIAUTO_COOKIE_LOGIN_URL：body 为 { username/phone, company_name, wps_company_name }（无需密码）。
+ * 响应支持 cookies 数组、或 { wps_sid: "..." }。
+ * @returns {Promise<boolean>}
  */
-async function injectAuthFromCookieApi(repoDir, spawnEnvExtra) {
+async function injectAuthFromCookieApi(repoDir, execEnvRow, spawnEnvExtra) {
+  const { resolveWpsLoginCredentials, authJsonFromWpsSid } = await import('./wpsAccountLogin.js');
+  const { phone, company } = resolveWpsLoginCredentials(execEnvRow, spawnEnvExtra);
   const env = { ...process.env, ...spawnEnvExtra };
   const url = env.UIAUTO_COOKIE_LOGIN_URL && String(env.UIAUTO_COOKIE_LOGIN_URL).trim();
-  const username = env.E2E_USERNAME && String(env.E2E_USERNAME).trim();
-  const password = env.E2E_PASSWORD && String(env.E2E_PASSWORD).trim();
-  if (!url || !username || !password) return;
+  if (!url) {
+    console.warn('[Executor] 未配置 UIAUTO_COOKIE_LOGIN_URL，无法用手机号+企业名换取 wps_sid');
+    return false;
+  }
+  if (!phone || !company) {
+    console.warn('[Executor] 执行环境需配置手机号与企业名');
+    return false;
+  }
 
   const authPath = path.join(repoDir, 'auth.json');
   const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
@@ -264,74 +269,69 @@ async function injectAuthFromCookieApi(repoDir, spawnEnvExtra) {
     const res = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({
+        username: phone,
+        phone,
+        company_name: company,
+        wps_company_name: company,
+      }),
       signal: controller.signal,
     });
     clearTimeout(timer);
     if (!res.ok) {
       console.warn(`[Executor] Cookie 登录接口 HTTP ${res.status}，未写入 auth.json`);
-      return;
+      return false;
     }
     const data = await res.json().catch(() => null);
     if (!data) {
       console.warn('[Executor] Cookie 登录接口响应非 JSON，未写入 auth.json');
-      return;
+      return false;
     }
-    let cookies = [];
-    if (Array.isArray(data)) cookies = data;
-    else if (Array.isArray(data.cookies)) cookies = data.cookies;
-    else if (data.data && Array.isArray(data.data.cookies)) cookies = data.data.cookies;
-    if (!cookies.length) {
-      console.warn('[Executor] Cookie 登录接口未返回 cookies 数组，未写入 auth.json');
-      return;
+    let storageState = null;
+    const sid = data.wps_sid ?? data.wpsSid ?? data.data?.wps_sid;
+    if (sid) {
+      storageState = authJsonFromWpsSid(sid);
+    } else {
+      let cookies = [];
+      if (Array.isArray(data)) cookies = data;
+      else if (Array.isArray(data.cookies)) cookies = data.cookies;
+      else if (data.data && Array.isArray(data.data.cookies)) cookies = data.data.cookies;
+      const normalized = cookies.map(normalizePlaywrightCookie).filter(Boolean);
+      if (!normalized.length) {
+        console.warn('[Executor] Cookie 登录接口未返回 wps_sid 或 cookies');
+        return false;
+      }
+      storageState = { cookies: normalized, origins: Array.isArray(data.origins) ? data.origins : [] };
     }
-    const normalized = cookies.map(normalizePlaywrightCookie).filter(Boolean);
-    if (!normalized.length) {
-      console.warn('[Executor] Cookie 列表规范化后为空（需 name、domain），未写入 auth.json');
-      return;
-    }
-    const origins = Array.isArray(data.origins) ? data.origins : [];
-    const storageState = { cookies: normalized, origins };
+    if (!storageState?.cookies?.length) return false;
     await fs.writeFile(authPath, JSON.stringify(storageState, null, 2), 'utf8');
-    console.log('[Executor] 已通过 Cookie 登录接口写入 auth.json');
+    console.log('[Executor] 已通过手机号+企业名接口写入 auth.json（wps_sid）');
+    return true;
   } catch (e) {
     clearTimeout(timer);
     console.warn('[Executor] Cookie 登录接口调用失败:', e?.message || e);
+    return false;
   }
 }
 
-/**
- * 执行前：若手机号(用户名)+密码+企业名称齐全，则调 WPS 账号 API 换 Cookie，写入仓库 auth.json（覆盖此前 WPS_SID / Cookie 接口结果）。
- * 来源：执行环境 test_username / test_password / wps_company_name，或由合并环境变量 E2E_USERNAME、E2E_PASSWORD、WPS_COMPANY_NAME（如 run.env）。
- */
-function resolveWpsLoginTriplet(execEnvRow, spawnEnvExtra) {
+/** 手机号+企业名换 sid（WPS 账号站）；密码仅来自服务端部署配置，不在环境卡片填写。 */
+async function injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra) {
   const env = { ...process.env, ...spawnEnvExtra };
-  const phone =
-    (execEnvRow?.test_username && String(execEnvRow.test_username).trim()) ||
-    (env.E2E_USERNAME && String(env.E2E_USERNAME).trim()) ||
-    '';
   const password =
     (execEnvRow?.test_password && String(execEnvRow.test_password)) ||
-    (env.E2E_PASSWORD && String(env.E2E_PASSWORD)) ||
+    (env.UIAUTO_INTERNAL_LOGIN_PASSWORD && String(env.UIAUTO_INTERNAL_LOGIN_PASSWORD).trim()) ||
+    (env.E2E_PASSWORD && String(env.E2E_PASSWORD).trim()) ||
     '';
-  const company =
-    (execEnvRow?.wps_company_name && String(execEnvRow.wps_company_name).trim()) ||
-    (env.WPS_COMPANY_NAME && String(env.WPS_COMPANY_NAME).trim()) ||
-    '';
-  return { phone, password, company };
-}
-
-async function injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra) {
-  const { phone, password, company } = resolveWpsLoginTriplet(execEnvRow, spawnEnvExtra);
-  if (!phone || !password || !company) return;
-
-  let loginWpsAccountViaApi;
-  try {
-    ({ loginWpsAccountViaApi } = await import('./wpsAccountLogin.js'));
-  } catch (e) {
-    console.warn('[Executor] WPS 账号 API 登录不可用:', e?.message || e);
-    return;
+  if (!password) {
+    console.warn(
+      '[Executor] 未配置 UIAUTO_COOKIE_LOGIN_URL，且服务端无 UIAUTO_INTERNAL_LOGIN_PASSWORD，无法换取 wps_sid',
+    );
+    return false;
   }
+
+  const { resolveWpsLoginCredentials, loginWpsAccountViaApi } = await import('./wpsAccountLogin.js');
+  const { phone, company } = resolveWpsLoginCredentials(execEnvRow, spawnEnvExtra);
+  if (!phone || !company) return false;
 
   const authPath = path.join(repoDir, 'auth.json');
   try {
@@ -343,13 +343,107 @@ async function injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra) {
     const normalized = cookies.map(normalizePlaywrightCookie).filter(Boolean);
     if (!normalized.length) {
       console.warn('[Executor] WPS 账号登录返回的 Cookie 规范化后为空，未写入 auth.json');
-      return;
+      return false;
+    }
+    const wpsSid = normalized.find((c) => c.name === 'wps_sid');
+    if (!wpsSid?.value) {
+      console.warn('[Executor] WPS 账号登录未返回 wps_sid');
+      return false;
     }
     const storageState = { cookies: normalized, origins: [] };
     await fs.writeFile(authPath, JSON.stringify(storageState, null, 2), 'utf8');
-    console.log('[Executor] 已通过 WPS 账号 API 登录写入 auth.json（供 Playwright storageState）');
+    console.log('[Executor] 已通过 WPS 账号 API 获取 wps_sid 并写入 auth.json');
+    return true;
   } catch (e) {
     console.warn('[Executor] WPS 账号 API 登录失败:', e?.message || e);
+    return false;
+  }
+}
+
+const AIDOCS_HOME_URL = 'https://365.kdocs.cn/aidocs/home/';
+
+/** 用当前 auth.json 探测是否已进入已登录首页（可见「新建应用」） */
+async function probeAidocsHomeLoggedIn(repoDir, spawnEnvExtra = {}) {
+  const authPath = path.join(repoDir, 'auth.json');
+  try {
+    await fs.access(authPath);
+  } catch {
+    return false;
+  }
+  const rules = spawnEnvExtra.UIAUTO_HOST_RESOLVER_RULES
+    ? String(spawnEnvExtra.UIAUTO_HOST_RESOLVER_RULES).trim()
+    : '';
+  const launchOptions = { headless: true };
+  if (rules) {
+    launchOptions.args = [`--host-resolver-rules=${rules}`];
+  }
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const context = await browser.newContext({
+      storageState: authPath,
+      locale: 'zh-CN',
+      viewport: { width: 1920, height: 1080 },
+    });
+    const page = await context.newPage();
+    await page.goto(AIDOCS_HOME_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.waitForSelector('text=新建应用', { timeout: 45000 });
+    return true;
+  } catch (e) {
+    console.warn('[Executor] 首页登录探测未通过:', e?.message || e);
+    return false;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+/** 部署配置 WPS_SID（data/.env）时写入 auth.json，用于无法走账号 API 的冒烟/调试 */
+async function injectAuthFromConfiguredWpsSid(repoDir, spawnEnvExtra) {
+  const env = { ...process.env, ...spawnEnvExtra };
+  const sid = (env.WPS_SID && String(env.WPS_SID).trim()) || '';
+  if (!sid) return false;
+  const { authJsonFromWpsSid } = await import('./wpsAccountLogin.js');
+  const storageState = authJsonFromWpsSid(sid);
+  if (!storageState?.cookies?.length) return false;
+  const authPath = path.join(repoDir, 'auth.json');
+  await fs.writeFile(authPath, JSON.stringify(storageState, null, 2), 'utf8');
+  console.log('[Executor] 已用配置的 WPS_SID 写入 auth.json');
+  return true;
+}
+
+/**
+ * 执行登录注入：
+ * 1. 用例自带 storageState → 探测首页；失败则回退
+ * 2. 可选 data/.env 的 WPS_SID
+ * 3. 执行环境手机号+企业名 → UIAUTO_COOKIE_LOGIN_URL / WPS 账号 API
+ */
+async function injectExecutionAuth(repoDir, execEnvRow, spawnEnvExtra, { storageState } = {}) {
+  const hadCaseAuth = await injectRecordedStorageState(repoDir, storageState);
+  if (hadCaseAuth) {
+    if (await probeAidocsHomeLoggedIn(repoDir, spawnEnvExtra)) {
+      console.log('[Executor] 用例自带 wps_sid/Cookie 已通过首页探测');
+      return;
+    }
+    console.log('[Executor] 用例 Cookie 未通过首页探测，回退执行环境 API 获取 wps_sid');
+  }
+
+  if (await injectAuthFromConfiguredWpsSid(repoDir, spawnEnvExtra)) {
+    if (await probeAidocsHomeLoggedIn(repoDir, spawnEnvExtra)) {
+      console.log('[Executor] 配置的 WPS_SID 已通过首页探测');
+      return;
+    }
+    console.log('[Executor] 配置的 WPS_SID 未通过首页探测，继续尝试执行环境 API');
+  }
+
+  let apiOk = await injectAuthFromCookieApi(repoDir, execEnvRow, spawnEnvExtra);
+  if (!apiOk) {
+    apiOk = await injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra);
+  }
+
+  if (await probeAidocsHomeLoggedIn(repoDir, spawnEnvExtra)) {
+    console.log('[Executor] 执行环境登录后首页探测通过');
+  } else {
+    console.warn('[Executor] 执行环境登录后仍未看到「新建应用」，请检查账号、企业名或 SwitchHosts');
   }
 }
 
@@ -452,9 +546,7 @@ async function prepareRepoExecutionEnv(repoDir, execEnvRow) {
   }
   const spawnEnvExtra = await prepareExecutionProfileForRepo(repoDir, execEnvRow);
   await mergeUiautoHostResolverIntoRepoDotEnv(repoDir, spawnEnvExtra.UIAUTO_HOST_RESOLVER_RULES || '');
-  await injectAuthFromEnv(repoDir);
-  await injectAuthFromCookieApi(repoDir, spawnEnvExtra);
-  await injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra);
+  await injectExecutionAuth(repoDir, execEnvRow, spawnEnvExtra, { storageState: null });
   const restoreHeadless = await forceHeadlessInRepo(repoDir);
   return { spawnEnvExtra, restoreHeadless };
 }
@@ -768,12 +860,7 @@ export async function runSingleCaseInRepo(repoDir, casePath, execEnvRow, options
 
   const spawnEnvExtra = await prepareExecutionProfileForRepo(repoDir, execEnvRow);
   await mergeUiautoHostResolverIntoRepoDotEnv(repoDir, spawnEnvExtra.UIAUTO_HOST_RESOLVER_RULES || '');
-  const hadRecordedAuth = await injectRecordedStorageState(repoDir, storageState);
-  if (!hadRecordedAuth) {
-    await injectAuthFromEnv(repoDir);
-    await injectAuthFromCookieApi(repoDir, spawnEnvExtra);
-    await injectAuthFromWpsAccountApi(repoDir, execEnvRow, spawnEnvExtra);
-  }
+  await injectExecutionAuth(repoDir, execEnvRow, spawnEnvExtra, { storageState });
 
   const restoreHeadless = headed ? (() => Promise.resolve()) : await forceHeadlessInRepo(repoDir);
   try {

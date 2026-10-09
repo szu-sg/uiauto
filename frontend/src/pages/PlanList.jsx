@@ -16,18 +16,42 @@ import WorkbenchLayout, {
   WorkbenchPagination,
 } from '../components/layout/WorkbenchLayout';
 import { displayCreatorText, isSameCreator } from '../utils/userDisplay';
-import { formatDateTime, formatRelativeTime } from '../utils/formatTime';
+import { formatDateOnly, formatDateTime } from '../utils/formatTime';
+import BrowserIcon from '../components/ui/BrowserIcon';
 import {
+  BROWSER_LABELS,
   formatPlanBrowsers,
   formatPlanEnvironment,
   formatPlanSchedule,
+  getBrowserIconId,
   parseCaseCount,
+  parseRunBrowsers,
 } from '../utils/planDisplay';
 import { useTeamWrite } from '../hooks/useTeamWrite';
 import SchedulePicker from '../components/plans/SchedulePicker';
 
 const API = '/api';
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
+
+function PlanBrowserCell({ plan }) {
+  const ids = parseRunBrowsers(plan);
+  const list = ids.length ? ids : ['chromium'];
+  const title = formatPlanBrowsers(plan);
+  return (
+    <div className="plan-browser-cell" title={title}>
+      {list.map((id) => {
+        const key = String(id).toLowerCase();
+        const label = BROWSER_LABELS[key] || key;
+        return (
+          <span key={key} className="plan-browser-cell__item">
+            <BrowserIcon id={getBrowserIconId(key)} size={18} className="plan-browser-cell__icon" />
+            <span className="plan-browser-cell__label">{label}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function PlanList() {
   const user = useUser();
@@ -115,6 +139,10 @@ export default function PlanList() {
           const bv = b.schedule_cron || (b.schedule_once ? '~once' : '');
           va = String(av); vb = String(bv);
           return va.localeCompare(vb) * dir;
+        }
+        case 'created_at': {
+          va = a.created_at || ''; vb = b.created_at || '';
+          return String(va).localeCompare(String(vb)) * dir;
         }
         default: {
           va = a.created_at || ''; vb = b.created_at || '';
@@ -335,8 +363,19 @@ export default function PlanList() {
             />
           )}
         >
-          <div className="wb-table-wrap plan-table-scroll">
-            <table className="wb-table plan-table">
+          <div className="plan-table-scroll">
+            <table className="plan-table">
+              <colgroup>
+                {bulkSelectMode && <col className="plan-col plan-col--check" />}
+                <col className="plan-col plan-col--name" />
+                <col className="plan-col plan-col--count" />
+                <col className="plan-col plan-col--env" />
+                <col className="plan-col plan-col--browser" />
+                <col className="plan-col plan-col--schedule" />
+                <col className="plan-col plan-col--creator" />
+                <col className="plan-col plan-col--created" />
+                <col className="plan-col plan-col--actions" />
+              </colgroup>
               <thead>
                 <tr>
                   {bulkSelectMode && (
@@ -368,10 +407,10 @@ export default function PlanList() {
                       <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
                     </button>
                   </th>
-                  <th>
+                  <th className="plan-table__count-h">
                     <button
                       type="button"
-                      className={`plan-sort-btn${sortKey === 'cases' ? ' plan-sort-btn--active' : ''}`}
+                      className={`plan-sort-btn plan-sort-btn--center${sortKey === 'cases' ? ' plan-sort-btn--active' : ''}`}
                       onClick={() => toggleSort('cases')}
                       aria-label="按用例数排序"
                     >
@@ -379,8 +418,9 @@ export default function PlanList() {
                       <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'cases' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
                     </button>
                   </th>
-                  <th className="plan-table__env-h">环境 / 浏览器</th>
-                  <th>
+                  <th className="plan-table__env-h">执行环境</th>
+                  <th className="plan-table__browser-h">浏览器</th>
+                  <th className="plan-table__schedule-h">
                     <button
                       type="button"
                       className={`plan-sort-btn${sortKey === 'schedule' ? ' plan-sort-btn--active' : ''}`}
@@ -391,8 +431,23 @@ export default function PlanList() {
                       <span className="plan-sort-btn__arrow" aria-hidden>{sortKey === 'schedule' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</span>
                     </button>
                   </th>
-                  <th>创建人</th>
-                  <th className="plan-table__actions-h">操作</th>
+                  <th className="plan-table__creator-h">创建人</th>
+                  <th className="plan-table__created-h">
+                    <button
+                      type="button"
+                      className={`plan-sort-btn${sortKey === 'created_at' ? ' plan-sort-btn--active' : ''}`}
+                      onClick={() => toggleSort('created_at')}
+                      aria-label="按创建时间排序"
+                    >
+                      创建时间
+                      <span className="plan-sort-btn__arrow" aria-hidden>
+                        {sortKey === 'created_at' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                      </span>
+                    </button>
+                  </th>
+                  <th className="plan-table__actions-h">
+                    <span className="plan-table__actions-head">操作</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -402,14 +457,13 @@ export default function PlanList() {
                   const creatorIsMe = isSameCreator(p.creator, user);
                   const planEnabled = p.enabled !== 0 && p.enabled !== false;
                   const envLabel = formatPlanEnvironment(p);
-                  const browserLabel = formatPlanBrowsers(p);
                   const scheduleLabel = formatPlanSchedule(p);
                   const isRunning = runningPlanId === p.id;
 
                   return (
                     <tr
                       key={p.id ?? `plan-${idx}`}
-                      className={`wb-table__row plan-row${planEnabled ? '' : ' plan-row--disabled'}${isRunning ? ' plan-row--running' : ''}`}
+                      className={`plan-row${planEnabled ? '' : ' plan-row--disabled'}${isRunning ? ' plan-row--running' : ''}`}
                       tabIndex={0}
                       title={`创建于 ${formatDateTime(p.created_at)}`}
                       onClick={() => {
@@ -445,31 +499,29 @@ export default function PlanList() {
                         </td>
                       )}
                       <td className="plan-table__name-cell" title={p.name || ''}>
-                        <div className="plan-name-group">
-                          <span className="plan-name-group__name">
-                            {isRunning && <span className="plan-running-dot" title="执行中" />}
-                            {p.name}
-                          </span>
-                          <span className="plan-name-group__meta" title={`${envLabel} · ${browserLabel}`}>
-                            {envLabel}{envLabel && browserLabel ? ' · ' : ''}{browserLabel}
-                          </span>
-                        </div>
+                        <span className="plan-name-group__name">
+                          {isRunning && <span className="plan-running-dot" title="执行中" />}
+                          {p.name}
+                        </span>
                       </td>
                       <td className="plan-table__count">
                         <span className="plan-count-badge">{caseCount}</span>
                       </td>
                       <td className="plan-table__env-col">
                         {envLabel ? (
-                          <span className="plan-env-tag" title={envLabel}>{envLabel}</span>
+                          <span className="plan-table__cell-text" title={envLabel}>{envLabel}</span>
                         ) : (
-                          <span className="text-faint">—</span>
+                          <span className="plan-table__muted">—</span>
                         )}
+                      </td>
+                      <td className="plan-table__browser-col">
+                        <PlanBrowserCell plan={p} />
                       </td>
                       <td className="plan-table__schedule-col">
                         {scheduleLabel && scheduleLabel !== '—' ? (
                           <span className="plan-schedule-badge">{scheduleLabel}</span>
                         ) : (
-                          <span className="text-faint">—</span>
+                          <span className="plan-table__muted">—</span>
                         )}
                       </td>
                       <td className="plan-table__creator">
@@ -477,6 +529,15 @@ export default function PlanList() {
                           <UserChip user={user} size="sm" />
                         ) : (
                           <UserChip label={displayCreatorText(p.creator, user)} size="sm" />
+                        )}
+                      </td>
+                      <td className="plan-table__created-col">
+                        {p.created_at ? (
+                          <time className="plan-table__cell-text plan-table__cell-text--muted" title={formatDateTime(p.created_at)}>
+                            {formatDateOnly(p.created_at)}
+                          </time>
+                        ) : (
+                          <span className="plan-table__muted">—</span>
                         )}
                       </td>
                       <td className="plan-table__actions">

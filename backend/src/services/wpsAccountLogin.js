@@ -61,11 +61,50 @@ function pickUserIdByCompanyName(users, companyName) {
   throw new Error(`未找到公司「${q}」，可选：${names.join(' | ')}`);
 }
 
+/** 执行环境登录凭据：仅需手机号 + 企业名（密码不落库、不参与换 sid）。 */
+export function resolveWpsLoginCredentials(execEnvRow, spawnEnvExtra = {}) {
+  const env = { ...process.env, ...spawnEnvExtra };
+  const phone =
+    (execEnvRow?.test_username && String(execEnvRow.test_username).trim()) ||
+    (env.E2E_USERNAME && String(env.E2E_USERNAME).trim()) ||
+    '';
+  const company =
+    (execEnvRow?.wps_company_name && String(execEnvRow.wps_company_name).trim()) ||
+    (env.WPS_COMPANY_NAME && String(env.WPS_COMPANY_NAME).trim()) ||
+    '';
+  return { phone, company };
+}
+
+export function authJsonFromWpsSid(wpsSid) {
+  const value = String(wpsSid || '').trim();
+  if (!value) return null;
+  const expires = Math.floor(Date.now() / 1000) + 86400 * 365;
+  const base = {
+    name: 'wps_sid',
+    value,
+    path: '/',
+    expires,
+    httpOnly: false,
+    secure: true,
+    sameSite: 'Lax',
+  };
+  return {
+    cookies: [
+      { ...base, domain: '.kdocs.cn' },
+      { ...base, domain: '.wps.cn' },
+    ],
+    origins: [],
+  };
+}
+
 /**
  * @param {{ phone: string, password: string, companyName: string }} params
  * @returns {Promise<{ cookies: import('playwright').Cookie[] }>}
  */
 export async function loginWpsAccountViaApi(params) {
+  if (!params.password) {
+    throw new Error('WPS 账号站登录缺少服务端自动化密码配置');
+  }
   const api = await request.newContext({
     baseURL: ACCOUNT_ORIGIN,
     extraHTTPHeaders: { ...BROWSER_LIKE_HEADERS },
@@ -75,21 +114,28 @@ export async function loginWpsAccountViaApi(params) {
     const warmup = await api.get('/', { headers: { ...SAME_SITE_HEADERS } });
     assertOk(warmup.ok(), `GET / 失败: ${warmup.status()}`);
 
-    const passRes = await api.get('/api/v3/passkey', { headers: { ...SAME_SITE_HEADERS } });
+    const passRes = await api.get(
+      `/api/v3/passkey?account=${encodeURIComponent(params.phone)}`,
+      { headers: { ...SAME_SITE_HEADERS } },
+    );
     const passJson = await passRes.json();
     assertOk(passRes.ok(), `passkey 失败: ${passRes.status()}`);
-    assertOk(passJson.result === 'ok' && passJson.pass_key && passJson.ssid, 'passkey 响应异常');
+    const passKey = passJson.pass_key ?? passJson.auth_key;
+    assertOk(passJson.result === 'ok' && passKey && passJson.ssid, 'passkey 响应异常');
+
+    const loginFrom = process.env.WPS_ACCOUNT_LOGIN_FROM?.trim() || 'weblogin_v3';
+    const captchaType = process.env.WPS_SAFE_VERIFY_CAPTCHA_TYPE?.trim() || 'mock';
 
     const verifyRes = await api.post('/api/v3/account/safe_verify', {
       headers: { ...SAME_SITE_HEADERS },
       form: {
         ssid: passJson.ssid,
-        password: encryptPasswordRsaBase64(passJson.pass_key, params.password),
+        password: encryptPasswordRsaBase64(passKey, params.password),
         account: params.phone,
-        from: 'weblogin_v2',
+        from: loginFrom,
         source: 'web',
         keeponline: '1',
-        captcha_type: 'mock',
+        captcha_type: captchaType,
       },
     });
     const verifyJson = await verifyRes.json();

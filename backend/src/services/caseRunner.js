@@ -100,6 +100,12 @@ export async function runPlanCases(runId, plan) {
   const insertCase = db.prepare(`
     INSERT INTO run_cases (run_id, case_path, browser, status) VALUES (?, ?, ?, 'pending')
   `);
+  const markCaseRunning = db.prepare(
+    "UPDATE run_cases SET status = 'running' WHERE id = ? AND status = 'pending'",
+  );
+  const appendRunLog = db.prepare(`
+    UPDATE runs SET log_text = substr(COALESCE(log_text, '') || ?, -16000) WHERE id = ?
+  `);
 
   const id = Number(runId);
   const teamId = plan.team_id;
@@ -222,9 +228,12 @@ export async function runPlanCases(runId, plan) {
         await fs.mkdir(caseResultDir, { recursive: true });
         if (materializeError) {
           updateCase.run('failed', null, materializeError, null, null, null, null, null, caseRowId);
-          logChunks.push(`\n--- case#${caseId} (跳过) ---\n${materializeError}\n`);
+          const skipLine = `\n--- case#${caseId} (跳过) ---\n${materializeError}\n`;
+          logChunks.push(skipLine);
+          appendRunLog.run(skipLine, runId);
           return;
         }
+        markCaseRunning.run(caseRowId);
         const start = Date.now();
         const result = await runCase({
           teamId,
@@ -238,7 +247,10 @@ export async function runPlanCases(runId, plan) {
           headed: false,
         });
         const duration = Date.now() - start;
-        logChunks.push(`\n--- ${casePath} [case#${caseId}] (exit ${result.code}) ---\n${result.stdout}\n${result.stderr}\n`);
+        const statusLabel = result.code === 0 ? '通过' : '失败';
+        const caseLog = `\n--- ${casePath} [case#${caseId}] ${statusLabel} (${duration}ms, exit ${result.code}) ---\n${result.stdout}\n${result.stderr}\n`;
+        logChunks.push(caseLog);
+        appendRunLog.run(caseLog, runId);
 
         const fromResult = path.join(WORKSPACE_ROOT, `test-results-${caseRowId}`);
         await copyArtifacts(fromResult, caseResultDir, casePath);
@@ -261,7 +273,9 @@ export async function runPlanCases(runId, plan) {
         );
       } catch (taskErr) {
         const msg = taskErr?.message || String(taskErr);
-        logChunks.push(`\n--- ${casePath} (执行异常) ---\n${msg}\n`);
+        const errLine = `\n--- ${casePath} (执行异常) ---\n${msg}\n`;
+        logChunks.push(errLine);
+        appendRunLog.run(errLine, runId);
         updateCase.run('failed', null, msg, null, null, null, null, null, caseRowId);
       }
     })));

@@ -10,3 +10,4 @@ import { fileURLToPath } from 'url';
 const __dirnameRoot = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirnameRoot, '../.env') });
 dotenv.config({ path: path.join(__dirnameRoot, '../data/.env') });
+dotenv.config({ path: path.join(__dirnameRoot, '../data/run.env') });

@@ -125,16 +125,22 @@ export default function CaseRecordedEdit() {
   }, [id, loading, authDirty]);
 
   const caseSource = caseItem?.source || caseItem?.case_source || caseItem?.metadata?.source || 'recorded';
+  const isScriptFirstCase = caseSource === 'imported' || caseSource === 'mcp' || caseSource === 'manual';
 
-  const buildMetadata = () => ({
-    source: caseSource,
-    tags: meta.tags,
-    language,
-    script,
-    scriptStale,
-    steps,
-    login_preference: meta.login_preference || 'auto',
-  });
+  const buildMetadata = () => {
+    const base = {
+      source: caseSource,
+      tags: meta.tags,
+      language,
+      script,
+      scriptStale,
+      steps,
+    };
+    if (!isScriptFirstCase) {
+      base.login_preference = meta.login_preference || 'auto';
+    }
+    return base;
+  };
 
   const loadVersions = () => {
     setVersionsLoading(true);
@@ -189,8 +195,10 @@ export default function CaseRecordedEdit() {
         tags: meta.tags,
         script,
         metadata: buildMetadata(),
-        login_preference: meta.login_preference || 'auto',
       };
+      if (!isScriptFirstCase) {
+        body.login_preference = meta.login_preference || 'auto';
+      }
       const clearingAuth = authClearPending;
       if (clearingAuth) body.clear_auth = true;
       else if (authDirty && authState) body.storageState = authState;
@@ -384,41 +392,49 @@ export default function CaseRecordedEdit() {
             ))}
           </div>
         </div>
-        <div className="recorder-field">
-          <span>登录方式</span>
-          <select
-            className="plan-detail-field"
-            value={meta.login_preference || 'auto'}
-            onChange={(e) => setMeta((m) => ({ ...m, login_preference: e.target.value }))}
-            disabled={!canWrite}
-          >
-            {LOGIN_PREFERENCE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="recorder-field">
-          <span>登录 Cookie</span>
-          <div className="recorder-auth-row">
-            <span className="recorder-auth-row__meta">
-              {authClearPending
-                ? '已标记清空，保存后生效'
-                : (authState?.cookies?.length
-                  ? `${authState.cookies.length} 条（含 wps_sid 等）`
-                  : '未配置，计划执行将使用环境账号')}
-              {authDirty && !authClearPending ? ' · 未保存' : ''}
-            </span>
-            {canWrite && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setAuthJsonOpen(true)}
+        {isScriptFirstCase ? (
+          <p className="recorder-field recorder-field__hint">
+            导入/脚本用例：登录与地址由脚本或测试计划执行环境提供，无需在此配置 Cookie。
+          </p>
+        ) : (
+          <>
+            <div className="recorder-field">
+              <span>登录方式</span>
+              <select
+                className="plan-detail-field"
+                value={meta.login_preference || 'auto'}
+                onChange={(e) => setMeta((m) => ({ ...m, login_preference: e.target.value }))}
+                disabled={!canWrite}
               >
-                编辑 Cookie
-              </button>
-            )}
-          </div>
-        </div>
+                {LOGIN_PREFERENCE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="recorder-field">
+              <span>登录 Cookie</span>
+              <div className="recorder-auth-row">
+                <span className="recorder-auth-row__meta">
+                  {authClearPending
+                    ? '已标记清空，保存后生效'
+                    : (authState?.cookies?.length
+                      ? `${authState.cookies.length} 条（含 wps_sid 等）`
+                      : '未配置，计划执行将使用环境账号')}
+                  {authDirty && !authClearPending ? ' · 未保存' : ''}
+                </span>
+                {canWrite && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setAuthJsonOpen(true)}
+                  >
+                    编辑 Cookie
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
         <div className="recorder-field">
           <span>标签</span>
           <div className="plan-detail-field recorder-tags-input">

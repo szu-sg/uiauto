@@ -4,10 +4,11 @@ import { useUser } from '../context/UserContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import UserChip from '../components/UserChip';
+import UserAvatar from '../components/UserAvatar';
 import EmptyState from '../components/ui/EmptyState';
 import WorkbenchLayout, { WorkbenchPanel, WorkbenchToolbar } from '../components/layout/WorkbenchLayout';
-import { isSameCreator } from '../utils/userDisplay';
-import { formatDateTime } from '../utils/formatTime';
+import { displayName, isSameCreator } from '../utils/userDisplay';
+import { formatDateOnly, formatDateTime } from '../utils/formatTime';
 import { useTeamWrite } from '../hooks/useTeamWrite';
 import { canCreateExecutionEnvironment, canManageTeamMembers, currentTeamRole } from '../utils/teamDisplay';
 const API = '/api';
@@ -24,15 +25,28 @@ const BASE_URL_PLACEHOLDER = {
   private: 'http://10.0.0.1:8080',
 };
 
+/** 手机号+企业名换 sid 暂未开放，执行使用环境内 wps_sid */
+const SHOW_TEST_ACCOUNT_SECTION = false;
+
+function wpsSidFromRow(row) {
+  const s = row?.extra_env?.WPS_SID;
+  return s != null && String(s).trim() ? String(s).trim() : '';
+}
+
+function maskWpsSid(sid) {
+  if (!sid) return '';
+  const s = String(sid);
+  if (s.length <= 14) return `${s.slice(0, 4)}…`;
+  return `${s.slice(0, 8)}…${s.slice(-4)}`;
+}
+
 function emptyForm() {
   return {
     name: '',
     env_kind: 'staging',
     base_url: '',
     headers: [],
-    test_username: '',
-    test_password: '',
-    wps_company_name: '',
+    wps_sid: '',
     switchhosts_text: '',
   };
 }
@@ -55,18 +69,11 @@ function displayBaseUrl(raw) {
 function EnvFacts({ row }) {
   const facts = [];
   if (row.env_kind === 'test' && row.switchhosts_text && String(row.switchhosts_text).trim()) {
-    facts.push('Hosts 已配置');
+    facts.push('SwitchHosts');
   }
   const hc = Array.isArray(row.headers) ? row.headers.length : 0;
-  if (hc > 0) facts.push(`${hc} 个请求头`);
-  if (row.test_username) facts.push(`账号 ${row.test_username}`);
-  if (row.password_set) facts.push('密码已配置');
-  if (row.wps_company_name && String(row.wps_company_name).trim()) {
-    facts.push(`企业 ${String(row.wps_company_name).trim()}`);
-  }
-  if (facts.length === 0) {
-    return <span className="env-card__fact env-card__fact--muted">仅名称与类型</span>;
-  }
+  if (hc > 0) facts.push(`${hc} 请求头`);
+  if (facts.length === 0) return null;
   return facts.map((text) => (
     <span key={text} className="env-card__fact">{text}</span>
   ));
@@ -79,6 +86,32 @@ function EnvCreatorCell({ row, currentUser }) {
     ? currentUser
     : createdBy;
   return <UserChip user={chipUser} size="sm" />;
+}
+
+/** 卡片底部：头像 + 姓名·日期（同一行、日期无时分秒） */
+function EnvCardCreatorLine({ row, currentUser }) {
+  const createdBy = row.created_by;
+  if (!createdBy) return <span className="env-card__fact env-card__fact--muted">—</span>;
+  const chipUser = isSameCreator(createdBy.real_name, currentUser) && currentUser
+    ? currentUser
+    : createdBy;
+  const name = displayName(chipUser);
+  const dateOnly = row.created_at ? formatDateOnly(row.created_at) : '';
+  const fullTitle = row.created_at ? formatDateTime(row.created_at) : name;
+  return (
+    <div className="env-card__foot-creator" title={fullTitle}>
+      <UserAvatar user={chipUser} name={name} size="sm" />
+      <p className="env-card__foot-line">
+        <span className="env-card__foot-name">{name}</span>
+        {dateOnly ? (
+          <>
+            <span className="env-card__foot-sep" aria-hidden>·</span>
+            <time className="env-card__foot-date" dateTime={row.created_at}>{dateOnly}</time>
+          </>
+        ) : null}
+      </p>
+    </div>
+  );
 }
 export default function Environments() {
   const user = useUser();
@@ -131,9 +164,7 @@ export default function Environments() {
       env_kind: row.env_kind || 'staging',
       base_url: row.base_url || '',
       headers: Array.isArray(row.headers) && row.headers.length ? [...row.headers] : [],
-      test_username: row.test_username || '',
-      test_password: '',
-      wps_company_name: row.wps_company_name || '',
+      wps_sid: wpsSidFromRow(row),
       switchhosts_text: row.switchhosts_text != null ? String(row.switchhosts_text) : '',
     });
     setErr('');
@@ -169,19 +200,24 @@ export default function Environments() {
     const headers = form.headers
       .map((h) => ({ name: String(h.name || '').trim(), value: h.value != null ? String(h.value) : '' }))
       .filter((h) => h.name);
+    const extra = {
+      ...(editingRow?.extra_env && typeof editingRow.extra_env === 'object' && !Array.isArray(editingRow.extra_env)
+        ? editingRow.extra_env
+        : {}),
+    };
+    const sid = form.wps_sid.trim();
+    if (sid) extra.WPS_SID = sid;
+    else delete extra.WPS_SID;
+
     const body = {
       name: form.name.trim(),
       env_kind: form.env_kind,
       base_url: form.base_url.trim() || null,
       headers,
-      test_username: form.test_username.trim() || null,
-      wps_company_name: form.wps_company_name.trim() || null,
+      extra_env: extra,
       switchhosts_text:
         form.env_kind === 'test' ? (form.switchhosts_text.trim() || null) : null,
     };
-    if (editingId === 'new' || form.test_password.length) {
-      body.test_password = form.test_password.length ? form.test_password : null;
-    }
     setSaving(true);
     setErr('');
     const url = editingId === 'new' ? API + '/environments' : API + '/environments/' + editingId;
@@ -228,9 +264,8 @@ export default function Environments() {
       rows = rows.filter((r) => {
         const name = String(r.name || '').toLowerCase();
         const base = String(r.base_url || '').toLowerCase();
-        const company = String(r.wps_company_name || '').toLowerCase();
         const creator = String(r.created_by?.real_name || '').toLowerCase();
-        return name.includes(k) || base.includes(k) || company.includes(k) || creator.includes(k);
+        return name.includes(k) || base.includes(k) || creator.includes(k);
       });
     }
     return rows;
@@ -323,27 +358,34 @@ export default function Environments() {
 
       <section className="env-drawer__section">
         <div className="env-drawer__section-head">
-          <h3 className="env-drawer__section-title">测试账号</h3>
-          <span className="env-drawer__optional">可选</span>
-        </div>
-        <p className="env-drawer__hint">
-          配置后执行前自动换取 Cookie，写入 <code>auth.json</code> 供 Playwright 登录态运行。
-        </p>
-        <div className="env-drawer__field-grid">
-          <label className="env-drawer__field">
-            <span className="env-drawer__label">手机号</span>
-            <input className="plan-detail-field" value={form.test_username} onChange={(e) => setForm((f) => ({ ...f, test_username: e.target.value }))} placeholder="WPS 登录手机号" autoComplete="off" />
-          </label>
-          <label className="env-drawer__field">
-            <span className="env-drawer__label">密码</span>
-            <input className="plan-detail-field" type="password" value={form.test_password} onChange={(e) => setForm((f) => ({ ...f, test_password: e.target.value }))} placeholder={editingId !== 'new' ? '留空保留原密码' : '可选'} autoComplete="new-password" />
-          </label>
+          <h3 className="env-drawer__section-title">登录 Cookie</h3>
+          <span className="env-drawer__optional">执行必填</span>
         </div>
         <label className="env-drawer__field">
-          <span className="env-drawer__label">WPS 企业名称</span>
-          <input className="plan-detail-field" value={form.wps_company_name} onChange={(e) => setForm((f) => ({ ...f, wps_company_name: e.target.value }))} placeholder="与多公司列表中的公司名一致" autoComplete="off" spellCheck={false} />
+          <span className="env-drawer__label">wps_sid</span>
+          <textarea
+            className="plan-detail-field env-drawer__textarea env-drawer__sid-input"
+            value={form.wps_sid}
+            onChange={(e) => setForm((f) => ({ ...f, wps_sid: e.target.value }))}
+            rows={3}
+            placeholder="V02S…"
+            spellCheck={false}
+            autoComplete="off"
+          />
         </label>
       </section>
+
+      {SHOW_TEST_ACCOUNT_SECTION && (
+        <section className="env-drawer__section">
+          <div className="env-drawer__section-head">
+            <h3 className="env-drawer__section-title">测试账号</h3>
+            <span className="env-drawer__optional">可选</span>
+          </div>
+          <p className="env-drawer__hint">
+            执行前用手机号与企业名调用登录接口换取 <code>wps_sid</code>（暂未启用）。
+          </p>
+        </section>
+      )}
     </>
   ) : null;
 
@@ -459,50 +501,54 @@ export default function Environments() {
           <div className="env-grid">
             {filteredList.map((row) => {
               const url = displayBaseUrl(row.base_url);
-              const isOwner = row.is_owner || Number(row.user_id) === Number(user?.id);
+              const sid = wpsSidFromRow(row);
+              const kindCls = row.env_kind === 'staging' ? 'staging' : row.env_kind === 'private' ? 'private' : 'test';
+              const factChips = <EnvFacts row={row} />;
+              const canEdit = canCreateEnv && canEditEnvRow(row);
               return (
-                <article key={row.id} className={`env-card${isOwner ? ' env-card--mine' : ''}`}>
-                  <div className="env-card__head">
-                    <div className="env-card__title-row">
-                      <h3 className="env-card__name">{row.name}</h3>
-                      <KindBadge kind={row.env_kind} />
-                      {isOwner && <span className="env-card__mine-tag">我的</span>}
+                <article key={row.id} className={`env-card env-card--${kindCls}`}>
+                  <header className="env-card__top">
+                    <h3 className="env-card__name" title={row.name}>{row.name}</h3>
+                    <KindBadge kind={row.env_kind} />
+                  </header>
+
+                  <dl className="env-card__spec">
+                    <div className="env-card__spec-row">
+                      <dt>基础 URL</dt>
+                      <dd className="env-card__mono" title={url || undefined}>
+                        {url || <span className="env-card__placeholder">未设置</span>}
+                      </dd>
                     </div>
-                    {canCreateEnv && canEditEnvRow(row) ? (
-                      <div className="env-card__actions">
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => startEdit(row)}>
-                          编辑
-                        </button>
-                        <button type="button" className="btn btn-danger btn-sm" onClick={() => remove(row.id)}>
-                          删除
-                        </button>
+                    <div className="env-card__spec-row">
+                      <dt>wps_sid</dt>
+                      <dd className="env-card__sid">
+                        {sid ? (
+                          <>
+                            <span className="env-card__pill env-card__pill--ok">已配置</span>
+                            <code className="env-card__mono env-card__sid-value" title="脱敏展示">{maskWpsSid(sid)}</code>
+                          </>
+                        ) : (
+                          <span className="env-card__pill env-card__pill--warn">未配置，执行前请编辑填写</span>
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {factChips && <div className="env-card__facts">{factChips}</div>}
+
+                  <footer className="env-card__foot">
+                    <EnvCardCreatorLine row={row} currentUser={user} />
+                    {canEdit ? (
+                      <div className="env-card__foot-actions">
+                        <button type="button" className="env-card__link" onClick={() => startEdit(row)}>编辑</button>
+                        <button type="button" className="env-card__link env-card__link--danger" onClick={() => remove(row.id)}>删除</button>
                       </div>
                     ) : (
-                      <span className="env-card__readonly">
-                        {canCreateEnv ? '仅创建人或空间管理员可编辑' : '只读成员仅可查看'}
+                      <span className="env-card__readonly-hint">
+                        {canCreateEnv ? '只读' : '仅查看'}
                       </span>
                     )}
-                  </div>
-
-                  <div className="env-card__url" title={url || undefined}>
-                    {url || '未填写基础 URL'}
-                  </div>
-
-                  <div className="env-card__facts">
-                    <EnvFacts row={row} />
-                  </div>
-
-                  <div className="env-card__footer">
-                    <div className="env-card__creator">
-                      <span className="env-card__creator-label">创建人</span>
-                      <EnvCreatorCell row={row} currentUser={user} />
-                    </div>
-                    {row.created_at && (
-                      <time className="env-card__time" title={formatDateTime(row.created_at)}>
-                        {formatDateTime(row.created_at)}
-                      </time>
-                    )}
-                  </div>
+                  </footer>
                 </article>
               );
             })}

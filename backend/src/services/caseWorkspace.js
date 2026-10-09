@@ -24,9 +24,17 @@ const PACKAGE_JSON = {
 
 const PLAYWRIGHT_CONFIG = `import { defineConfig } from '@playwright/test';
 import fs from 'fs';
+import dotenv from 'dotenv';
 
+dotenv.config();
 const authFile = process.env.AUTH_FILE || 'auth.json';
 const headed = process.env.PLAYWRIGHT_HEADLESS === '0';
+const hostRules = process.env.UIAUTO_HOST_RESOLVER_RULES
+  ? String(process.env.UIAUTO_HOST_RESOLVER_RULES).trim()
+  : '';
+const launchArgs = [];
+if (hostRules) launchArgs.push(\`--host-resolver-rules=\${hostRules}\`);
+if (headed) launchArgs.push('--start-maximized');
 
 export default defineConfig({
   testDir: '..',
@@ -41,10 +49,11 @@ export default defineConfig({
     ...(headed
       ? {
           viewport: null,
-          launchOptions: { args: ['--start-maximized'] },
+          launchOptions: { args: launchArgs.length ? launchArgs : ['--start-maximized'] },
         }
       : {
           viewport: { width: 1920, height: 1080 },
+          ...(launchArgs.length ? { launchOptions: { args: launchArgs } } : {}),
         }),
     ...(fs.existsSync(authFile) ? { storageState: authFile } : {}),
     trace: 'retain-on-failure',
@@ -92,6 +101,27 @@ export function linkCasesRootNodeModules() {
   } catch (e) {
     console.warn('[caseWorkspace] linkCasesRootNodeModules:', e?.message || e);
   }
+}
+
+export const SMOKE_SHARED_HELPERS = 'smoke-knowledge-helpers.mjs';
+
+/** 知识基座冒烟：共享 helper 供各用例 import（data/cases/_shared/） */
+export function ensureSmokeKnowledgeShared() {
+  ensureWorkspaceShell();
+  const sharedDir = path.join(CASES_ROOT, '_shared');
+  fs.mkdirSync(sharedDir, { recursive: true });
+  const dest = path.join(sharedDir, SMOKE_SHARED_HELPERS);
+  const candidates = [
+    path.join(__dirname, '../../../scripts/smoke-split/_shared', SMOKE_SHARED_HELPERS),
+    path.join(process.cwd(), 'scripts/smoke-split/_shared', SMOKE_SHARED_HELPERS),
+  ];
+  const src = candidates.find((p) => fs.existsSync(p));
+  if (!src) {
+    console.warn('[caseWorkspace] smoke shared helpers not found on disk, skip copy');
+    return dest;
+  }
+  fs.copyFileSync(src, dest);
+  return dest;
 }
 
 export function ensureWorkspaceShell() {

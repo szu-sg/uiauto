@@ -1,0 +1,437 @@
+{
+  "count": 48,
+  "items": [
+    {
+      "name": "SMK-001 首页正常加载",
+      "filename": "SMK-001_首页正常加载.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-002 顶部导航元素完整性",
+      "filename": "SMK-002_顶部导航元素完整性.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-003 首页 → 应用模板",
+      "filename": "SMK-003_首页_应用模板.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-004 应用模板 → 知识资产",
+      "filename": "SMK-004_应用模板_知识资产.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-005 知识资产 → 首页",
+      "filename": "SMK-005_知识资产_首页.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-006 问答输入框可用",
+      "filename": "SMK-006_问答输入框可用.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-007 发送问答",
+      "filename": "SMK-007_发送问答.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-008 应用列表展示",
+      "filename": "SMK-008_应用列表展示.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-009 分类筛选切换",
+      "filename": "SMK-009_分类筛选切换.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-010 应用搜索",
+      "filename": "SMK-010_应用搜索.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-011 新建应用弹出选择类型面板",
+      "filename": "SMK-011_新建应用弹出选择类型面板.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-012 选择类型跳转创建页",
+      "filename": "SMK-012_选择类型跳转创建页.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-013 各类型创建页 URL 正确性",
+      "filename": "SMK-013_各类型创建页_URL_正确性.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-014 新建应用-空名称表单校验",
+      "filename": "SMK-014_新建应用-空名称表单校验.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-015 新建应用-公开范围切换",
+      "filename": "SMK-015_新建应用-公开范围切换.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-016 新建应用-取消关闭面板",
+      "filename": "SMK-016_新建应用-取消关闭面板.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-017 填写信息并确定进入配置页",
+      "filename": "SMK-017_填写信息并确定进入配置页.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 完整创建：智能问答",
+      "filename": "SMK_完整创建_智能问答.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 完整创建：报告写作",
+      "filename": "SMK_完整创建_报告写作.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 完整创建：文档审查",
+      "filename": "SMK_完整创建_文档审查.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 完整创建：智能考试",
+      "filename": "SMK_完整创建_智能考试.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 完整创建：内容抽取",
+      "filename": "SMK_完整创建_内容抽取.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 应用模板创建：零售供应商合同审查",
+      "filename": "SMK_应用模板创建_零售供应商合同审查.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 应用模板创建：通用合同抽取",
+      "filename": "SMK_应用模板创建_通用合同抽取.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 应用模板创建：科研项目结题验收申报书",
+      "filename": "SMK_应用模板创建_科研项目结题验收申报书.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 应用模板创建：发票抽取",
+      "filename": "SMK_应用模板创建_发票抽取.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK 应用模板创建：新员工入职考试",
+      "filename": "SMK_应用模板创建_新员工入职考试.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-028 应用模板-接口无报错校验",
+      "filename": "SMK-028_应用模板-接口无报错校验.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-029 报告写作后续-创作启动",
+      "filename": "SMK-029_报告写作后续-创作启动.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-030 文档审查后续-审查启动",
+      "filename": "SMK-030_文档审查后续-审查启动.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-031 智能考试后续-生成启动",
+      "filename": "SMK-031_智能考试后续-生成启动.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-032 智能抽取后续-抽取启动",
+      "filename": "SMK-032_智能抽取后续-抽取启动.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-033 知识资产页正常加载",
+      "filename": "SMK-033_知识资产页正常加载.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-034 知识资产-子导航切换应用数据",
+      "filename": "SMK-034_知识资产-子导航切换应用数据.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-035 知识资产-子导航切换知识源",
+      "filename": "SMK-035_知识资产-子导航切换知识源.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-036 知识资产-统计卡片展示（数字非零断言）",
+      "filename": "SMK-036_知识资产-统计卡片展示_数字非零断言_.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-037 知识资产-知识源管理表格",
+      "filename": "SMK-037_知识资产-知识源管理表格.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-038 知识资产-知识源已解析文档数校验",
+      "filename": "SMK-038_知识资产-知识源已解析文档数校验.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-039 知识资产-文档管理跳转",
+      "filename": "SMK-039_知识资产-文档管理跳转.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-040 知识资产-资产管理跳转",
+      "filename": "SMK-040_知识资产-资产管理跳转.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-041 知识资产-设置弹出AI服务管理面板",
+      "filename": "SMK-041_知识资产-设置弹出AI服务管理面板.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-042 知识资产-企业知识资产跳转",
+      "filename": "SMK-042_知识资产-企业知识资产跳转.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-043 历史记录-最近应用列表展示",
+      "filename": "SMK-043_历史记录-最近应用列表展示.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-044 历史记录-最近应用打开（报告自动化）",
+      "filename": "SMK-044_历史记录-最近应用打开_报告自动化_.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-045 历史记录-最近应用打开（考试自动化）",
+      "filename": "SMK-045_历史记录-最近应用打开_考试自动化_.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-046 历史记录-最近应用打开（问答自动化）",
+      "filename": "SMK-046_历史记录-最近应用打开_问答自动化_.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-047 历史记录-最近应用打开（抽取自动化）",
+      "filename": "SMK-047_历史记录-最近应用打开_抽取自动化_.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    },
+    {
+      "name": "SMK-048 历史记录-最近应用打开（审查自动化）",
+      "filename": "SMK-048_历史记录-最近应用打开_审查自动化_.spec.js",
+      "tags": [
+        "知识基座",
+        "冒烟",
+        "imported"
+      ]
+    }
+  ]
+}

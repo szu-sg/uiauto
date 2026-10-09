@@ -1,12 +1,18 @@
 import { describeSchedule, parseCronToForm } from './cronSchedule';
 
-const BROWSER_LABELS = {
+export const BROWSER_LABELS = {
   chromium: 'Chromium',
   chrome: 'Chrome',
   msedge: 'Edge',
   firefox: 'Firefox',
   webkit: 'WebKit',
 };
+
+export function getBrowserIconId(id) {
+  const k = String(id || 'chromium').toLowerCase();
+  if (k === 'msedge') return 'edge';
+  return k;
+}
 
 export function parseCaseCount(plan) {
   if (!plan || typeof plan !== 'object') return 0;
